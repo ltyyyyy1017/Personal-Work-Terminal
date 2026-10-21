@@ -1,4 +1,7 @@
 import fs from "node:fs";
+import {decodePlainText} from "../../plain-text";
+import {readMaterial} from "../../material-reader";
+import {summarizeRecognition, type RecognizedDocument} from "../../reimbursement-recognition";
 import path from "node:path";
 import { mutateStore, newId, nowISO, readStore, dirs, appendLog } from "../../store";
 import { json, numOrNull, str } from "../http";
@@ -260,6 +263,8 @@ export async function uploadFiles(ctx: Ctx) {
     activity.items.find((i) => i.id === itemIdInput)?.id ?? activity.items[0]?.id ?? null;
   const kindOverride = String(form.get("kind") ?? "");
   const added: ReimbFile[] = [];
+  const recognized: RecognizedDocument[] = [];
+  assert(raw.length <= 20, "每次最多上传 20 份附件");
 
   for (const file of raw) {
     if (file.size > MAX_UPLOAD_BYTES) {
@@ -268,18 +273,25 @@ export async function uploadFiles(ctx: Ctx) {
     if (file.size === 0) continue;
     const id = newId("file");
     const ext = extOf(file.name);
-    assert([".pdf",".jpg",".jpeg",".png",".webp"].includes(ext), "报销材料支持 PDF、JPG、PNG 和 WebP");
+    assert([".pdf",".jpg",".jpeg",".png",".webp",".txt"].includes(ext), "报销材料支持 PDF、JPG、PNG、WebP 和 TXT");
     const buf = Buffer.from(await file.arrayBuffer());
+    if(ext===".txt") decodePlainText(buf);
     const mime = mimeOf(file.name);
     const saved = saveReimburseFile(activity.id, id, ext, buf);
     let text = "";
     let pages: number | undefined;
     let meta;
-    if (isPdfBytes(buf)) {
+    if (ext === ".txt") text = decodePlainText(buf);
+    else if (isPdfBytes(buf)) {
       const read = await readPdf(buf);
       text = read.text;
       pages = read.pages || undefined;
       meta = parseInvoiceText(text);
+    }
+    if (form.get("skipRecognition") !== "true" && buf.length <= 15 * 1024 * 1024) {
+      const doc = await readMaterial(buf, file.name, id);
+      recognized.push(doc);
+      if (doc.method !== "unreadable") { meta = doc.meta; text = doc.textPreview; pages = doc.pages ?? pages; }
     }
     const autoKind = suggestKind(file.name, text);
     const kind = (MAT_KINDS as readonly string[]).includes(kindOverride)
@@ -306,10 +318,23 @@ export async function uploadFiles(ctx: Ctx) {
   const { result } = await mutateStore((s) => {
     const a = findActivity(s, ctx.params.id);
     a.files.push(...added);
+    const summary = summarizeRecognition(recognized), fields = summary.fields;
+    // Supplemental material fills gaps only; existing edits and confirmed identities win.
+    for (const [target, source] of [["submitter", "name"], ["handler", "handler"], ["contact", "contact"], ["bankName", "bankName"], ["bankAccount", "bankAccount"]] as const) {
+      if (!a[target]?.trim() && fields[source]) a[target] = fields[source]!.value;
+    }
+    if (summary.taxi) {
+      const trip = a.taxi ?? { from: "", to: "", companions: [] };
+      if (!trip.from && fields.from) trip.from = fields.from.value;
+      if (!trip.to && fields.to) trip.to = fields.to.value;
+      if (!trip.companions.length && fields.companions) trip.companions = fields.companions.value.split("、").filter(Boolean).slice(0, 50);
+      a.taxi = trip; a.category = "交通差旅";
+    }
     a.updatedAt = nowISO();
     return a;
   });
-  return json({ activity: result, added });
+  const summary = summarizeRecognition(recognized);
+  return json({ activity: result, added, recognitionWarnings: [...recognized.flatMap(d => d.warnings), ...summary.warnings, ...summary.conflicts.map(c => `附件中的${c.field === "name" ? "报销人" : c.field === "companions" ? "同行人" : "信息"}不同，请核对后填写。`)] });
 }
 
 export async function patchFile(ctx: Ctx) {

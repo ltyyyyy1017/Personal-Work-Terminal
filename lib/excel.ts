@@ -106,7 +106,7 @@ export async function buildReimburseWorkbook(opts: {
   styleValue(ws.getCell("B3"), activity.department);
   styleLabel(ws.getCell("D3"), "报销人");
   ws.mergeCells("E3:F3");
-  styleValue(ws.getCell("E3"), activity.submitter || settings.reimbursement.submitter || "—");
+  styleValue(ws.getCell("E3"), activity.submitter || "—");
   styleLabel(ws.getCell("G3"), "报销日期");
   styleValue(ws.getCell("H3"), fmtDateFull(activity.date));
   ws.mergeCells("H3:I3");
@@ -274,9 +274,11 @@ export async function buildReimburseWorkbook(opts: {
   const tripCount = activity.files.filter((f) => f.kind === "行程单").length;
   const pairs: [string, string | number][] = [
     ["报销部门", activity.department],
-    ["报销人", activity.submitter || settings.reimbursement.submitter || ""],
+    ["报销人", activity.submitter || ""],
     ["报销日期", fmtDateFull(activity.date)],
-    ["联系方式", settings.reimbursement.phone || ""],
+    ["联系方式", activity.contact || ""],
+    ["经办人", activity.handler || ""],
+    ["费用归属", "实际报销人承担的费用"],
   ];
   let r = 4;
   for (let i = 0; i < pairs.length; i += 2) {
@@ -314,8 +316,8 @@ export async function buildReimburseWorkbook(opts: {
   borderRange(cover, r, 1, r, 4);
   r++;
 
-  const bank = settings.reimbursement.bankAccount
-    ? `${settings.reimbursement.bankName || ""} ${settings.reimbursement.bankAccount}`.trim()
+  const bank = activity.bankAccount
+    ? `${activity.bankName || ""} ${activity.bankAccount}`.trim()
     : "";
   for (const [label, value] of [
     ["收款账户", bank],
@@ -422,7 +424,7 @@ export async function buildReimburseWorkbook(opts: {
   const info=wb.addWorksheet("报销信息",{views:[{showGridLines:false}]});
   info.columns=[{width:22},{width:80}];
   const matter=opts.matterTitle||activity.matterId||"未关联";
-  const rows=[['报销名称',activity.name],['报销人',activity.submitter],['联系方式',activity.contact||'未填写'],['关联事务',matter],['上报状态',isReported(activity)?'已上报':'未上报'],['批款状态',isFunded(activity)?'已批款':'未批款'],...(activity.taxi?[['交通类型','打车'],['出发地',activity.taxi.from||'未填写'],['目的地',activity.taxi.to||'未填写'],['同行人',activity.taxi.companions.join('、')||'无 / 未填写'],['行程单附件',String(activity.files.filter(f=>f.kind==='行程单').length)+' 份']]:[])];
+  const rows=[['报销名称',activity.name],['报销人',activity.submitter],['经办人',activity.handler||'未填写'],['联系方式',activity.contact||'未填写'],['关联事务',matter],['上报状态',isReported(activity)?'已上报':'未上报'],['批款状态',isFunded(activity)?'已批款':'未批款'],...(activity.taxi?[['交通类型','打车'],['出发地',activity.taxi.from||'未填写'],['目的地',activity.taxi.to||'未填写'],['同行人',activity.taxi.companions.join('、')||'无 / 未填写'],['行程单附件',String(activity.files.filter(f=>f.kind==='行程单').length)+' 份']]:[])];
   for(const [key,value] of rows){const r=info.addRow([key,value]);styleLabel(r.getCell(1),key);styleValue(r.getCell(2),value);r.height=30;}
   const buf = await wb.xlsx.writeBuffer();
   return {

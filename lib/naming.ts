@@ -31,6 +31,7 @@ export function materialFileName(opts: {
   amount: number | null;
   kind: string;
   template?: string;
+  extension?: ".pdf" | ".txt";
 }): string {
   const template = opts.template || DEFAULT_NAMING;
   const base = template
@@ -39,7 +40,7 @@ export function materialFileName(opts: {
     .replace(/\{amount\}/g, formatAmount(opts.amount))
     .replace(/\{kind\}/g, opts.kind)
     .replace(/\{date\}/g, "");
-  return `${sanitizeFileBase(base)}.pdf`;
+  return `${sanitizeFileBase(base)}${opts.extension || ".pdf"}`;
 }
 
 export function kindRank(kind: string): number {
@@ -92,6 +93,7 @@ export function namingPlan(
           amount: item.amount,
           kind: file.kind,
           template,
+          extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
         }),
       });
     });
@@ -112,6 +114,7 @@ export function namingPlan(
         amount: null,
         kind: file.kind,
         template,
+        extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
       }),
     });
   });

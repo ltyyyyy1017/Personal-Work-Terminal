@@ -4,6 +4,7 @@ import {str} from "./http";
 import {isReported} from "../reimbursement-progress";
 
 export function applyReimbursementFields(a:ReimbActivity,b:Record<string,unknown>,s:Store){
+ for(const key of ["handler","bankName","bankAccount"] as const)if(key in b)a[key]=str(b[key],"",150).trim();
  if("contact" in b)a.contact=str(b.contact,"",150).trim();
  if("matterId" in b)a.matterId=str(b.matterId,"",100)||undefined;
  if(a.matterId){const matter=s.matters.find(m=>m.id===a.matterId);assert(matter,"关联事务不存在，请重新选择");assert(matter.department===a.department,"报销与关联事务须属于同一部门");}
