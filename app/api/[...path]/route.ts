@@ -10,6 +10,7 @@ import type { Task } from "@/lib/types";
 import * as core from "@/lib/server/handlers/core";
 import * as calendar from "@/lib/server/handlers/calendar";
 import * as reimburse from "@/lib/server/handlers/reimburse";
+import { exportMatter } from "@/lib/server/handlers/matter-reimbursements";
 import * as docs from "@/lib/server/handlers/docs";
 import * as workspace from "@/lib/server/handlers/workspace";
 import * as equipment from "@/lib/server/handlers/equipment";
@@ -71,6 +72,7 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
     if(path[0]==="workspace"&&path[1]==="departments"&&path.length===3&&method==="PATCH"){ctx.params.id=path[2];return await structure.saveDepartment(ctx);}
     if(key==="matters"&&method==="POST"){ctx.params.id="";return await structure.saveMatter(ctx);}
     if(key==="matters"&&method==="GET")return json({matters:readStore().matters});
+    if(path[0]==="matters"&&path.length===4&&path[2]==="reimbursements"&&path[3]==="export"&&method==="POST")return await exportMatter(ctx);
     if(path[0]==="matters"&&path.length===2&&method==="PATCH")return await structure.saveMatter(ctx);
     if(path[0]==="matters"&&path.length===2&&method==="DELETE")return await structure.deleteMatter(ctx);
     if(key==="members/order"&&method==="PATCH")return await people.reorderMembers(ctx);

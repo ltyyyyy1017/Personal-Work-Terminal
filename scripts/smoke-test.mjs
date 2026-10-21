@@ -156,6 +156,25 @@ try{
   await json(`activities/${delegated.id}`,"DELETE");assert.equal((await fetch(`${base}/api/activities/${delegated.id}`,{headers:{cookie}})).status,404);assert.equal((await fetch(`${base}/api/activities/${delegated.id}/download`,{headers:{cookie}})).status,404);
   const {readdir}=await import('node:fs/promises');assert.ok(!(await readdir(path.join(directory,'files','reimburse'))).includes(delegated.id));assert.ok(!(await readdir(path.join(directory,'exports'))).includes(delegated.id));
   console.log("PASS real TXT preview/upload, supplemental autofill, manual values retained, claimant/handler separation, no owner identity/payment defaults, ZIP/Excel and deletion cleanup");
+  const bundleMatter=(await json("matters","POST",{title:"整事务打包测试",department:"行政部"})).matter;
+  const bundleUrl=`matters/${bundleMatter.id}/reimbursements/export`;
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST"})).status,401);
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie,origin:"https://example.invalid"}})).status,403);
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie}})).status,400);
+  const bills=[];
+  for(const submitter of ["测试报销甲","测试报销乙","测试报销甲"]){
+    const a=(await json("activities","POST",{name:"同名交通报销",submitter,handler:"代办负责人",itemName:"交通",amount:20,department:"行政部",matterId:bundleMatter.id})).activity;bills.push(a);
+    if(bills.length===1)assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie}})).status,400);
+    const form=new FormData();form.append("files",new File(["同行人：测试同行一、测试同行二"],"说明.txt",{type:"text/plain"}));form.append("kind","其他");form.append("skipRecognition","true");
+    const legacy=await json(`activities/${a.id}/files`,"POST",form);assert.equal(legacy.added[0].kind,"其他");
+    const other=new FormData();other.append("files",new File(["保管说明：测试材料用途"],"补充说明.txt",{type:"text/plain"}));other.append("skipRecognition","true");await json(`activities/${a.id}/files`,"POST",other);
+  }
+  const firstPack=await json(`activities/${bills[0].id}/build`,"POST");assert.ok(firstPack.output.zipName.includes("报销人-测试报销甲"));assert.ok(!firstPack.output.zipName.includes("代办负责人"));assert.ok(firstPack.output.manifest.some(f=>f.kind==="同行人"&&f.name.includes("同行人")));assert.ok(firstPack.output.manifest.some(f=>f.kind==="其他"&&f.name.includes("其他")));
+  const bundleResponse=await request(bundleUrl,"POST");assert.equal(bundleResponse.headers.get('cache-control'),'no-store');assert.equal(bundleResponse.headers.get('x-workbench-activity-count'),'3');const disposition=decodeURIComponent(bundleResponse.headers.get('content-disposition'));assert.ok(disposition.includes('测试报销甲、测试报销乙'));assert.ok(disposition.includes('整事务打包测试'));
+  const bundle=await JSZip.loadAsync(await bundleResponse.arrayBuffer()),bundleNames=Object.keys(bundle.files);assert.ok(bundleNames.some(n=>n.includes('/报销人-测试报销甲/01_')));assert.ok(bundleNames.some(n=>n.includes('/报销人-测试报销甲/03_')));assert.ok(bundleNames.some(n=>n.includes('/报销人-测试报销乙/02_')));assert.equal(bundleNames.filter(n=>n.endsWith('.xlsx')).length,3);assert.ok(!bundleNames.some(n=>n.endsWith('.zip')));assert.ok(bundleNames.some(n=>n.includes('同行人')&&n.endsWith('.txt')));assert.ok(!bundleNames.some(n=>n.includes('集成验证活动')));
+  const catalog=await bundle.file(bundleNames.find(n=>n.endsWith('事务报销清单.txt'))).async('string');assert.ok(catalog.includes('合计：¥60.00'));assert.ok(catalog.includes('测试报销乙'));assert.ok(catalog.includes('代办负责人'));
+  for(const a of bills)await json(`activities/${a.id}`,"DELETE");await json(`matters/${bundleMatter.id}`,"DELETE");
+  console.log("PASS claimant ZIP filenames, legacy companion labels, genuine other materials, whole-matter export/auth/empty guards, per-person folders, duplicate names and complete catalog");
   assert.equal(activity.contact,"");assert.equal(activity.matterId,reimbursementMatter.id);assert.equal(activity.category,"交通差旅");assert.deepEqual(activity.taxi.companions,["测试同行甲","测试同行乙"]);
   const prematureFunding=await fetch(`${base}/api/activities/${activity.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({fundingStatus:"paid"})});assert.equal(prematureFunding.status,400);
   assert.equal((await json(`activities/${activity.id}`)).activity.fundingStatus,"unpaid");

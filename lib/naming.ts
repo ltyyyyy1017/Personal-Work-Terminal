@@ -40,7 +40,23 @@ export function materialFileName(opts: {
     .replace(/\{amount\}/g, formatAmount(opts.amount))
     .replace(/\{kind\}/g, opts.kind)
     .replace(/\{date\}/g, "");
-  return `${sanitizeFileBase(base)}${opts.extension || ".pdf"}`;
+  const safeBase = shortFileBase(base, 180);
+  const label = opts.kind === "同行人" && !safeBase.includes("同行人") ? `${safeBase}-同行人` : safeBase;
+  return `${label}${opts.extension || ".pdf"}`;
+}
+
+export function shortFileBase(name: string, maxBytes: number): string {
+  let result = "";
+  const encoder = new TextEncoder();
+  for (const char of sanitizeFileBase(name)) {
+    if (encoder.encode(result + char).length > maxBytes) break;
+    result += char;
+  }
+  return result.trim();
+}
+
+export function reimbursementPackageBase(activity: Pick<ReimbActivity, "name" | "submitter">): string {
+  return `报销人-${shortFileBase(activity.submitter, 60) || "未填写"}_${shortFileBase(activity.name, 100) || "未命名"}_报销材料`;
 }
 
 export function kindRank(kind: string): number {
@@ -126,6 +142,7 @@ export function suggestKind(fileName: string, text?: string): ReimbFile["kind"] 
   const n = fileName.toLowerCase();
   if (/行程单|行程|itinerary|e-ticket/.test(n)) return "行程单";
   if (/发票|invoice|fapiao|数电票/.test(n)) return "发票";
+  if (/同行|同乘/.test(n)) return "同行人";
   if (/销售单|销售|sales/.test(n)) return "销售单";
   if (/送货单|送货|配送/.test(n)) return "送货单";
   if (/清单|明细|报价|采购单|订单/.test(n)) return "清单";
@@ -139,6 +156,7 @@ export function suggestKind(fileName: string, text?: string): ReimbFile["kind"] 
   if (/送货单/.test(t)) return "送货单";
   if (/销售单/.test(t)) return "销售单";
   if (/收据|收款收据/.test(t)) return "收据";
+  if (/同行人(?:员|員)?[:：]|同行者[:：]|同乘人(?:员|員)?[:：]|同行名单|同行名單/.test(t)) return "同行人";
   return "其他";
 }
 

@@ -5,7 +5,9 @@ import type { ReimbActivity, ReimbOutput } from "./types";
 import { appendLog, dirs, mutateStore, readStore } from "./store";
 import { readReimburseFile } from "./files";
 import { mergePdfs, normalizeToPdf } from "./pdf";
-import { namingPlan, sanitizeFileBase } from "./naming";
+import { namingPlan, reimbursementPackageBase, suggestKind } from "./naming";
+import { decodePlainText } from "./plain-text";
+import { readMaterial } from "./material-reader";
 import { buildReimburseWorkbook } from "./excel";
 import { analyzeActivity, type CheckItem } from "./checks";
 import { AppError } from "./errors";
@@ -46,6 +48,18 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
   if (!activity) throw new AppError("报销活动不存在", 404);
   if (!activity.items.length) throw new AppError("请先添加报销事项（名称 + 金额）", 400);
   if (!activity.files.length) throw new AppError("请先上传报销材料", 400);
+
+  // Upgrade old generic companion attachments when regenerating a package.
+  const companionIds = new Set<string>();
+  for (const file of activity.files.filter(f => f.kind === "其他")) {
+    let text = "";
+    try { if (/\.txt$/i.test(file.originalName)) text = decodePlainText(readReimburseFile(file.storedName)); } catch { /* The normal packaging step reports missing files. */ }
+    let companion = suggestKind(file.originalName, text) === "同行人";
+    if (!companion && !/\.txt$/i.test(file.originalName) && file.size <= 15 * 1024 * 1024) {
+      try { companion = (await readMaterial(readReimburseFile(file.storedName), file.originalName, file.id)).kind === "同行人"; } catch { /* Keep unidentified material as other. */ }
+    }
+    if (companion) { file.kind = "同行人"; companionIds.add(file.id); }
+  }
 
   const settings = organizationSettings(store.settings,activity.department);
   const plan = namingPlan(activity, settings.reimbursement.namingTemplate);
@@ -124,7 +138,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
   fs.writeFileSync(path.join(outDir, readmeName), readme, "utf8");
 
   const zip = new JSZip();
-  const folder = zip.folder(`${sanitizeFileBase(activity.name)}_报销材料`)!;
+  const folder = zip.folder(reimbursementPackageBase(activity))!;
   for (const m of manifest) {
     folder.file(m.name, fs.readFileSync(path.join(outDir, m.name)));
   }
@@ -135,7 +149,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   });
-  const zipName = `${sanitizeFileBase(activity.name)}_报销材料_${toDateStr(new Date()).replace(/-/g, "")}.zip`;
+  const zipName = `${reimbursementPackageBase(activity)}_${toDateStr(new Date()).replace(/-/g, "")}.zip`;
   fs.writeFileSync(path.join(outDir, zipName), zipBuffer);
 
   const output: ReimbOutput = {
@@ -155,6 +169,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     const target = s.activities.find((a) => a.id === activityId);
     if (!target) throw new AppError("报销活动不存在", 404);
     target.output = output;
+    for (const file of target.files) if (file.kind === "其他" && companionIds.has(file.id)) file.kind = "同行人";
     target.updatedAt = new Date().toISOString();
     if (target.status === "draft") target.status = "packaged";
     appendLog(

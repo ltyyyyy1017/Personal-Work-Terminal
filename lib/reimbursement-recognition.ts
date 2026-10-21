@@ -137,6 +137,7 @@ export function parseMaterialText(raw: string, file: { id: string; name: string;
   fields.contact = labeled(text, "申请人手机(?:号)?|报销人联系方式|报销人手机(?:号)?", 50);
   const route = routeFields(text);
   fields.from = route.from; fields.to = route.to; fields.companions = companionNames(text, file.name);
+  const materialKind: MatKind = fields.companions && (kind === "其他" || kind === "清单" && /同行|同乘/.test(file.name)) ? "同行人" : kind;
   const taxi = /打车|出租车|网约车|滴滴|的士|客运服务|客運服務/.test(compact + file.name) || !!fields.companions || !!(route.from && route.to);
   let subject = labeled(text, "商品说明|商品名称|项目名称|费用名称|交易说明|服务名称|報銷事項|报销事项", 100);
   if (subject && /^(?:规格|单位|数量|单价|金额|税率|税额|货物或)/.test(subject)) subject = undefined;
@@ -149,7 +150,7 @@ export function parseMaterialText(raw: string, file: { id: string; name: string;
   for (const k of Object.keys(fields) as RecognitionField[]) if (!fields[k]) delete fields[k];
   const refund = /退款成功|退款完成|全额退款|红字发票|负数发票|已冲红|小写[^\d\n]{0,5}[-−]/.test(compact);
   if (refund) delete fields.amount;
-  return { ...file, kind, fields, meta, reference: labeled(text, "交易单号|订单编号|订单号|商户单号|支付单号", 80)?.replace(/\s/g, ""), taxi, category,
+  return { ...file, kind: materialKind, fields, meta, reference: labeled(text, "交易单号|订单编号|订单号|商户单号|支付单号", 80)?.replace(/\s/g, ""), taxi, category,
     confidence: file.confidence ?? 1, textPreview: text.slice(0, 3000), refund, warnings: [...(refund ? ["检测到退款或红字票据，未将票面金额当作报销支出，请核对实际净支出。"] : []), ...(route.multiple ? ["行程单包含不同路线，未将第一程当作整份行程；请核对并填写本次报销的起终点。"] : []), ...(invoice && !fields.buyer ? ["无法明确区分发票购买方名称，请对照原件核对抬头；未使用销售方名称代填。"] : [])] };
 }
 
