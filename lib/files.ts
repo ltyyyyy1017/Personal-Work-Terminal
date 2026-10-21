@@ -43,7 +43,7 @@ export function saveReimburseFile(
   ext: string,
   bytes: Uint8Array,
 ): { storedName: string; size: number } {
-  if(!/^[\w-]+$/.test(activityId)||!/^[\w-]+$/.test(fileId)||![".pdf",".jpg",".jpeg",".png",".webp"].includes(ext))throw new AppError("非法文件参数",400);
+  if(!/^[\w-]+$/.test(activityId)||!/^[\w-]+$/.test(fileId)||![".pdf",".jpg",".jpeg",".png",".webp",".txt"].includes(ext))throw new AppError("非法文件参数",400);
   const dir = resolveInside(dirs.reimburse, activityId);
   fs.mkdirSync(dir, { recursive: true });
   const storedName = `${activityId}/${fileId}${ext}`;

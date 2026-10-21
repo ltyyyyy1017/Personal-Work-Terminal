@@ -6,7 +6,7 @@ import ts from "typescript";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 const folder = path.resolve("runtime/recognition-check"); await fs.mkdir(folder, { recursive: true });
-const names = ["errors", "invoice", "pdf", "reimbursement-recognition", "material-reader"];
+const names = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "material-reader"];
 for (const name of names) {
   let source = await fs.readFile(`lib/${name}.ts`, "utf8");
   for (const dep of names) source = source.replaceAll(`"./${dep}"`, `"./${dep}.mjs"`);

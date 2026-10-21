@@ -75,6 +75,9 @@ export interface ReimbOutput {
 }
 
 export interface ReimbActivity {
+  handler?: string;
+  bankName?: string;
+  bankAccount?: string;
   matterId?: string;
   reported?: boolean;
   fundingStatus?: "unpaid" | "paid";

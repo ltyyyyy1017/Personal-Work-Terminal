@@ -65,11 +65,12 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     if (!file) continue;
     try {
       const buf = readReimburseFile(file.storedName);
-      const { bytes } = await normalizeToPdf(buf, file.mime, file.originalName);
+      const plainText = /\.txt$/i.test(file.originalName);
+      const { bytes } = plainText ? { bytes: buf } : await normalizeToPdf(buf, file.mime, file.originalName);
       const name = uniqueName(row.name, used);
       fs.writeFileSync(path.join(outDir, name), bytes);
       manifest.push({ name, size: bytes.byteLength, kind: file.kind });
-      pdfList.push(bytes);
+      if (!plainText) pdfList.push(bytes);
     } catch (err) {
       failed.push(`${file.originalName}（${(err as Error).message}）`);
     }
@@ -103,7 +104,9 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
 
   const readme = [
     `${settings.org || "示例组织一"} · ${activity.name}`,
-    `报销部门：${activity.department}    报销人：${activity.submitter || settings.reimbursement.submitter}`,
+    `报销部门：${activity.department}    报销人：${activity.submitter || "待补充"}`,
+    `经办人：${activity.handler || "未填写"}`,
+    "TXT 补充材料按原格式保留，不参与 PDF 合并。",
     `报销日期：${fmtDateFull(activity.date)}`,
     `关联事务：${store.matters.find(m=>m.id===activity.matterId)?.title||"未关联"}`,
     `进度：${isReported(activity)?"已上报":"未上报"} · ${isFunded(activity)?"已批款":"未批款"}`,

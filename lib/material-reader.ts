@@ -7,6 +7,8 @@ import { createWorker, PSM, type Worker } from "tesseract.js";
 import { extractTextItems, getDocumentProxy, renderPageAsImage } from "unpdf";
 import { isPdfBytes } from "./pdf";
 import { parseMaterialText, type RecognizedDocument } from "./reimbursement-recognition";
+import { decodePlainText } from "./plain-text";
+import { layoutLines, invoiceColumnText } from "./material-layout";
 
 // Keep binary model and worker lookup in Node; bundling traineddata as JS breaks OCR.
 const requireFromProject = process.getBuiltinModule("module").createRequire(path.join(process.cwd(), "package.json"));
@@ -44,22 +46,15 @@ async function ocr(bytes: Buffer) {
     if (!s.pending) { s.idle = setTimeout(() => { const p = s.worker; s.worker = undefined; void p?.then(w => w.terminate()).catch(() => {}); }, 30_000); s.idle.unref?.(); }
   }
 }
-function lines(items: { str: string; x: number; y: number; height: number }[]) {
-  const rows: { y: number; items: typeof items }[] = [];
-  for (const item of items) {
-    let row = rows.find(row => Math.abs(row.y - item.y) <= Math.max(2, item.height * .35));
-    if (!row) { row = { y: item.y, items: [] }; rows.push(row); }
-    row.items.push(item);
-  }
-  return rows.sort((a, b) => b.y - a.y).map(row => row.items.sort((a, b) => a.x - b.x).map(i => i.str).join(" ")).join("\n");
-}
 export async function readMaterial(bytes: Buffer, name: string, id: string): Promise<RecognizedDocument> {
   const fingerprint = crypto.createHash("sha256").update(bytes).digest("hex"), warnings: string[] = [];
   let text = "", pages: number | undefined, method: RecognizedDocument["method"] = "pdf-text", confidence = 1;
   const pageTexts: string[] = [];
   let complete = true;
   try {
-    if (isPdfBytes(bytes)) {
+    if (/\.txt$/i.test(name)) {
+      method = "plain-text"; text = decodePlainText(bytes);
+    } else if (isPdfBytes(bytes)) {
       const proxy = await getDocumentProxy(new Uint8Array(bytes));
       try {
         pages = proxy.numPages;
@@ -67,7 +62,8 @@ export async function readMaterial(bytes: Buffer, name: string, id: string): Pro
         const content = await extractTextItems(proxy);
         let scanned = 0;
         for (const [i, items] of content.items.entries()) {
-          const pageText = lines(items);
+          const columns = invoiceColumnText(items);
+          const pageText = columns ? `${columns}\n${layoutLines(items)}` : layoutLines(items);
           if (pageText.replace(/\s/g, "").length >= 25) { text += `${pageText}\n`; pageTexts.push(pageText); continue; }
           if (++scanned > 3) { complete = false; warnings.push("扫描 PDF 仅自动识别前三个扫描页，其余页面请拆分后补充识别；本附件未自动填写整份金额。"); break; }
           const page = await proxy.getPage(i + 1), viewport = page.getViewport({ scale: 1 });
