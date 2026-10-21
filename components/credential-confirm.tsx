@@ -1,0 +1,10 @@
+"use client";
+import {useState} from "react";
+import EditorDialog from "./editor-dialog";
+export function useCredentialConfirm(onMessage:(message:string)=>void){
+ const [action,setAction]=useState<{id:string;operation:"copy"|"login";type?:string;popup?:boolean}|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState("");
+ async function json(path:string,body:unknown){const r=await fetch(`/api/workspace/${path}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error);return d;}
+ const confirm=(next:NonNullable<typeof action>)=>{setError("");setAction(next);};
+ const dialog=action&&<EditorDialog title="验证后使用登录凭据" subtitle="每次操作都需要主账号验证，授权仅供这次操作使用。" onClose={()=>{if(!busy)setAction(null);}}><form onSubmit={async e=>{e.preventDefault();const form=e.currentTarget,current=new FormData(form).get("current");form.reset();setBusy(true);setError("");try{const grant=await json("credential/authorize",{id:action.id,operation:action.operation,current});if(action.operation==="copy"){const d=await json("credential",{id:action.id,authorization:grant.authorization});await navigator.clipboard.writeText(d.password);onMessage("密码已复制，请妥善使用剪贴板");}else window.postMessage({source:"workbench",type:action.type||"automatic-login",id:action.id,popup:action.popup,authorization:grant.authorization},location.origin);setAction(null);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><div className="composer-body"><label className="field"><span>主账号密码</span><input name="current" type="password" autoComplete="current-password" required maxLength={200} autoFocus/></label>{error&&<p className="error-text" role="alert">{error}</p>}</div><footer className="modal-footer"><button type="button" className="button secondary" disabled={busy} onClick={()=>setAction(null)}>取消</button><button className="button primary" disabled={busy}>{busy?"正在验证…":"验证并继续"}</button></footer></form></EditorDialog>;
+ return {confirm,dialog};
+}

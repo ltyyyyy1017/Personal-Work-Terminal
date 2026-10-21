@@ -1,0 +1,228 @@
+/* Shared reading scale and surface hierarchy. Keep this after feature styles. */
+:root {
+  --ink: #1c2b42;
+  --muted: #65758b;
+  --bg: #e9edf5;
+  --surface-shadow: 0 3px 6px #263c5d05, 0 16px 38px -18px #263c5d34, inset 0 1px 0 #fff;
+  --surface-border: #ffffffed;
+}
+body { font-size: 16px; line-height: 1.65; color: var(--ink); background: var(--bg); }
+button, input, select, textarea { font-family: inherit; }
+.glass-ambient {
+  background: radial-gradient(ellipse at 8% 0%, #d7e5f8 0, transparent 48%),
+    radial-gradient(ellipse at 97% 72%, #e0def1 0, transparent 48%), #e9edf5;
+}
+.glass-ambient i { opacity: .65; }
+.sidebar {
+  background: linear-gradient(155deg, #f7faffeb, #eaf0f8dc);
+  box-shadow: 6px 0 28px #293c5f08;
+  border-right-color: #ffffffc9;
+}
+.sidebar .brand strong { font-size: 18px; letter-spacing: -.4px; color: #263c5a; }
+.sidebar .brand small { font-size: 10px; letter-spacing: 1.2px; color: #75859b; }
+.sidebar .nav-item { font-size: 15px; min-height: 44px; color: #5d718d; }
+.sidebar .workspace-subnav .nav-item, .sidebar .workspace-tools .nav-item { font-size: 14px; min-height: 41px; }
+.workspace-group-title strong { font-size: 16px; }
+.workspace-group-title small, .workspace-section-label { font-size: 12px; }
+.workspace-group-title { padding-block: 13px; }
+.sidebar .nav-item.active {
+  background: linear-gradient(140deg, #fff, #edf4ff);
+  border: 1px solid #fff;
+  box-shadow: 0 4px 10px #30548510, inset 0 1px 0 #fff;
+}
+.topbar { background: #f6f9fce0; border-bottom-color: #ffffffc9; box-shadow: 0 3px 18px #283f6303; }
+.breadcrumb { font-size: 14px; color: #64758e; }
+.search { height: 42px; background: #fff9; border-color: #d9e2ed; }
+.search input { font-size: 14px; }
+.page-content { padding-top: 36px; }
+.page-heading { margin-bottom: 30px; gap: 20px; }
+.page-heading h1 { font-size: 36px; line-height: 1.25; font-weight: 650; letter-spacing: -1px; color: #1b2e49; }
+.page-heading p { font-size: 16px; line-height: 1.75; color: #66758c; }
+.eyebrow { font-size: 12px; letter-spacing: .7px; color: #6a7d97; }
+.panel, .stat-card {
+  border: 1px solid var(--surface-border);
+  border-radius: 24px;
+  background-color: #ffffffdc;
+  background-image: var(--glass-light, linear-gradient(145deg, #ffffffc9, #f9fbff45));
+  box-shadow: var(--surface-shadow);
+  backdrop-filter: blur(20px) saturate(115%);
+  -webkit-backdrop-filter: blur(20px) saturate(115%);
+}
+.panel::after, .stat-card::after { box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 #ffffff70; }
+.panel-heading { padding: 26px 28px 22px; }
+.panel-heading h2 { font-size: 20px; font-weight: 650; color: #29415f; letter-spacing: -.3px; line-height: 1.45; }
+.panel-heading p { font-size: 14px; line-height: 1.75; color: #6b7b91; }
+.stats-grid { gap: 22px; }
+.stat-card { padding: 25px 26px; }
+.stat-top { font-size: 15px; font-weight: 550; color: #5e7390; }
+.stat-card > strong { font-size: 42px; font-weight: 650; color: #244770; margin: 17px 0 8px; }
+.stat-card small { font-size: 13px; color: #718198; }
+.stat-card:hover { box-shadow: 0 8px 14px #263c5d08, 0 24px 44px -18px #263c5d40, inset 0 1px 0 #fff; }
+.icon-tile { width: 40px; height: 40px; border-radius: 13px; }
+.button, .button.small, .settings-panel .button { font-size: 14px; min-height: 44px; padding: 11px 17px; line-height: 1.5; }
+.button.primary { box-shadow: 0 5px 12px #1277e731, 0 1px 2px #fff7 inset; }
+.button.secondary { border-color: #e1e7f0; background: linear-gradient(155deg, #fff, #f6f8fc); color: #4d6788; box-shadow: 0 2px 5px #2c48680a, inset 0 1px 0 #fff; }
+.text-button { font-size: 14px; min-height: 36px; }
+.icon-button { min-width: 38px; min-height: 38px; }
+.field > span, .editor-dialog .field > span { font-size: 14px; font-weight: 550; color: #526782; }
+.field input, .field select, .field textarea,
+.editor-dialog .field input, .editor-dialog .field select, .editor-dialog .field textarea {
+  font-size: 16px; min-height: 48px; line-height: 1.5; padding: 12px 14px;
+  background: #fbfcff; border-color: #d6dfec; color: #334a66;
+  box-shadow: inset 0 1px 3px #1d3c6705;
+}
+.field-help, .field em { font-size: 12px; }
+.field input::placeholder, .field textarea::placeholder { color: #8c9bb0; }
+.task-row { padding-block: 18px; }
+.task-main strong { font-size: 16px; line-height: 1.65; font-weight: 550; color: #334c6d; }
+.task-main > span, .task-main .task-followup-reason { font-size: 13px; line-height: 1.75; color: #718198; }
+.task-main em, .task-right small { font-size: 12px; }
+.task-review-actions .text-button { font-size: 13px; }
+.pill { font-size: 12px; line-height: 1.5; padding: 4px 9px; }
+.segmented button, .tabs button, .composer-mode button { font-size: 14px; min-height: 41px; }
+.timeline-item strong, .agenda-event strong { font-size: 15px; color: #3c526f; }
+.timeline-item p, .agenda-event p, .timeline-time { font-size: 13px; color: #718198; }
+.week-strip span { font-size: 13px; }.week-strip strong { font-size: 16px; }
+.schedule-free p { font-size: 15px; color: #718198; }.schedule-free span { font-size: 13px; }
+.panel-bottom-link { font-size: 14px; min-height: 54px; }
+.quick-grid button { padding: 19px; background: linear-gradient(140deg, #f4f7fc, #f9fbff); border-color: #e7edf5; box-shadow: inset 0 1px 0 #fff; }
+.quick-grid strong { font-size: 15px; color: #4c6382; }.quick-grid small { font-size: 13px; color: #7c8da4; }
+.empty h3 { font-size: 17px; }.empty p, .local-note p, .recent-row small { font-size: 14px; }
+.page-footer { font-size: 12px; color: #7a879a; }
+.profile strong { font-size: 14px; }.profile small { font-size: 12px; }
+.demo-invite, .demo-banner, .demo-banner button, .compact-empty, .integration-caption { font-size: 13px; }
+.week-strip button > span { font-size: 13px; }.week-strip button > strong { font-size: 16px; }
+.timeline-item .pill, .task-right .pill { font-size: 12px; }
+.feature-copy p, .feature-link, .integration-info p, .site-card p { font-size: 14px; }
+.feature-kicker, .feature-actions .button, .field code { font-size: 13px; }
+.kanban-card p, .kanban-card select, .calendar-weekday, .calendar-chip, .calendar-day small { font-size: 13px; }
+.calendar-day > span { font-size: 15px; }.agenda-event > span:not(.pill) { font-size: 14px; }
+.check-line, .check-line small, .item-card small, .upload-zone span, .build-footer small, .output-note { font-size: 13px; }
+.editor-dialog .member-option small, .editor-dialog .member-hint, .member-order-controls small { font-size: 13px; }
+.worklog-member-summary > div, .worklog-row small, .github-search small, .github-repo small, .github-activity > a, .github-activity > a small { font-size: 13px; }
+.matter-toggle p, .matter-empty, .matter-welcome p, .record-detail-list small, .performance-rules, .record-confirm, .review-assignment small { font-size: 13px; }
+.cloud-login > p, .cloud-operation p, .cloud-event-list small, .cloud-connection-footer, .site-login-message, .site-login-hint { font-size: 13px; }
+.borrowed-copy p, .borrowed-copy small, .borrowed-state > small, .borrowed-empty > span, .borrowed-updated, .borrowed-error, .borrowed-error > .text-button { font-size: 13px; }
+.library-connect p, .library-connect small, .library-placeholder > span, .portal-caption { font-size: 13px; }
+.record-table { font-size: 14px; }.record-table th, .record-table td { font-size: 14px; line-height: 1.7; }
+.record-table .text-button, .task-volunteer-section .record-table .text-button { font-size: 14px; }
+.table-footer { font-size: 13px; }.task-volunteer-heading p, .worklog-summary span { font-size: 14px; }
+.worklog-row strong, .member-card h3, .member-directory-card h3, .github-repo strong { font-size: 16px; }
+.worklog-row p, .github-repo p, .resource-card > p, .resource-account, .file-name small { font-size: 13px; color: #74859b; }
+.member-card p, .member-directory-card p { font-size: 14px; }
+.resource-title { font-size: 18px; }.credential-copy, .resource-actions .text-button { font-size: 13px; }
+.resource-hub.compact .resource-title { font-size: 15px; }.resource-hub.compact .resource-card > p { font-size: 13px; }
+.file-name strong, .reimbursement-row strong { font-size: 15px; }
+.department-settings-list strong { font-size: 15px; }.department-settings-list small { font-size: 13px; color: #788aa1; }
+.department-settings-list > button:not(.button) { padding: 16px; background: #f6f8fc; border-color: #e2e8f1; border-radius: 14px; }
+.settings-grid { gap: 28px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-panel { padding-bottom: 28px; min-width: 0; }
+.settings-panel form { padding-inline: 28px; }
+.settings-panel > .field { margin-inline: 28px; }
+.settings-panel > .button, .settings-panel > h3 { margin-left: 28px; }
+.settings-description { font-size: 14px; color: #6c7d94; line-height: 1.8; margin-inline: 28px; }
+.settings-divider { margin-inline: 28px; border-color: #e1e7f0; }
+.settings-panel > h3 { font-size: 17px; color: #4d6482; }
+.modal h2, .editor-dialog h2 { font-size: 26px; }
+.editor-dialog header p, .composer-hint, .ai-composer-footer small { font-size: 13px; }
+.editor-dialog .member-option strong, .composer-mode button span { font-size: 14px; }
+.intake-heading p, .intake-section-heading p, .intake-drop > span { font-size: 14px; }
+.intake-drop strong { font-size: 16px; }.intake-submit > label { font-size: 14px; }
+
+/* Account content shares one inset. Each inner section has its own surface. */
+.account-settings { grid-column: 1 / -1; padding-bottom: 0; }
+.account-settings > .panel-heading { border-bottom: 1px solid #e6ebf3; background: #f8faff50; border-radius: 24px 24px 0 0; }
+.account-settings-body { padding: 26px 28px 28px; }
+.account-owner {
+  margin-bottom: 24px; padding: 20px 22px; gap: 15px; border: 1px solid #e1e9f5; border-radius: 18px;
+  background: linear-gradient(120deg, #f0f6ff, #f8faff); box-shadow: inset 0 1px 0 #fff;
+}
+.account-owner-avatar { display: grid; place-items: center; flex-shrink: 0; width: 50px; height: 50px; border-radius: 16px; color: #4c8add; background: #fff; box-shadow: 0 4px 10px #3459900b; }
+.account-owner > div { min-width: 0; gap: 5px; }
+.account-owner strong { font-size: 19px; color: #2c4261; overflow-wrap: anywhere; }
+.account-owner small { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #7a8aa1; }
+.account-owner-dot { width: 6px; height: 6px; background: #65af93; border-radius: 50%; }
+.account-owner > button { margin-left: auto; flex-shrink: 0; }
+.account-security-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: stretch; }
+.account-section { min-width: 0; padding: 23px; background: #f5f7fb; border: 1px solid #e3e9f2; border-radius: 18px; box-shadow: inset 0 1px 0 #fff; }
+.account-settings h3, .account-section-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 17px; color: #3b5373; font-weight: 600; }
+.account-settings h3 > svg { color: #7893b8; flex-shrink: 0; }
+.account-section-heading { justify-content: space-between; gap: 12px; }.account-section-heading h3 { margin: 0; }
+.account-section-count { color: #8594a8; font-size: 13px; white-space: nowrap; }
+.account-settings .settings-description { margin: 0 0 17px; font-size: 14px; color: #728198; line-height: 1.85; }
+.account-settings .passkey-address-hint { padding: 13px 15px; margin: 18px 0; font-size: 13px; color: #6c819d; background: #eaf0f9; border: 1px solid #dfe7f3; border-radius: 12px; }
+.account-settings .passkey-add { margin-top: 4px; max-width: 100%; white-space: normal; }
+.account-settings .account-device-list { margin: 0; }
+.account-device { padding: 17px 0; gap: 13px; align-items: center; border-color: #e0e7f1; }
+.account-device:last-child { border-bottom: 0; padding-bottom: 0; }
+.account-device-icon { width: 45px; height: 45px; border-radius: 14px; background: #fff; box-shadow: 0 2px 8px #33558106; color: #7390b7; }
+.account-device strong { font-size: 15px; color: #415875; line-height: 1.7; }
+.account-device small { font-size: 12px; color: #7f8ea2; margin-top: 3px; }
+.account-device em { display: inline-block; font-size: 11px; vertical-align: middle; margin-left: 8px; padding: 2px 6px; }
+.account-device .text-button { font-size: 13px; padding-left: 5px; }
+.account-settings .passkey-row strong { font-size: 14px; }.account-settings .passkey-row small { font-size: 12px; }
+.account-settings form { padding: 0; }
+.account-settings .passkey-form { padding: 18px; background: #fff; border: 1px solid #e0e6f0; border-radius: 14px; margin-top: 18px; }
+.account-settings .passkey-form-actions button { font-size: 14px !important; }
+.account-password-section { background: #f7f9fc; border: 1px solid #e3e9f2; border-radius: 18px; margin-top: 20px; overflow: hidden; }
+.account-password-section > summary { display: flex; align-items: center; gap: 14px; cursor: pointer; list-style: none; padding: 21px 23px; }
+.account-password-section > summary::-webkit-details-marker { display: none; }
+.account-password-section > summary > span:nth-child(2) { flex: 1; min-width: 0; }
+.account-password-section summary strong { display: block; font-size: 16px; font-weight: 600; color: #435a77; }
+.account-password-section summary small { display: block; font-size: 13px; color: #7f8fa4; line-height: 1.7; margin-top: 4px; }
+.account-password-section summary > svg { color: #92a0b3; transition: transform .2s; flex-shrink: 0; }
+.account-password-section[open] summary > svg { transform: rotate(180deg); }
+.account-password-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; background: #edf1f8; color: #8398b6; flex-shrink: 0; }
+.account-password-content { padding: 4px 23px 24px; border-top: 1px solid #e7edf5; }
+.account-password-content > p { padding-top: 18px; }
+.account-password-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
+.account-settings .account-saved, .account-settings .account-error { margin-bottom: 0 !important; font-size: 14px !important; }
+.account-card > p { font-size: 15px; }.account-card .field > span { font-size: 14px; }
+.account-card input:not([type=checkbox]) { font-size: 16px; min-height: 48px; }
+.account-card input::placeholder, .account-trust strong { font-size: 14px; }
+.account-tabs button, .account-main-button, .passkey-login-button { font-size: 14px !important; }
+.account-trust small, .passkey-login > small, .account-hint, .account-footnote { font-size: 12px !important; }
+.account-network { font-size: 12px; }
+
+@media (max-width: 1200px) {
+  .settings-grid { grid-template-columns: minmax(0, 1fr); }
+  .account-security-grid { grid-template-columns: minmax(0, 1fr); }
+  .page-heading h1 { font-size: 32px; }
+}
+@media (max-width: 700px) {
+  .page-content { padding-top: 28px; }
+  .page-heading h1 { font-size: 30px; }.page-heading p { font-size: 15px; max-width: none; }
+  .page-heading { flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+  .page-heading > div { flex: 1 1 100%; min-width: 0; }
+  .panel, .stat-card { border-radius: 21px; }
+  .panel-heading { padding: 23px 22px 20px; }.panel-heading h2 { font-size: 19px; }.panel-heading p { font-size: 14px; }
+  .stat-card { padding: 21px; }.stat-top { font-size: 14px; }.stat-card > strong { font-size: 37px; }.stat-card small { font-size: 12px; }
+  .settings-panel form { padding-inline: 22px; }.settings-description { margin-inline: 22px; }
+  .account-settings-body { padding: 20px 21px 23px; }
+  .account-settings > .panel-heading { border-radius: 21px 21px 0 0; }
+  .account-owner { padding: 17px; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .account-owner strong { font-size: 18px; }.account-owner-avatar { width: 45px; height: 45px; }
+  .account-owner > button { padding: 9px 12px; }
+  .account-security-grid { gap: 16px; }.account-section { padding: 19px; border-radius: 16px; }
+  .account-password-section > summary { padding: 19px; }.account-password-content { padding-inline: 19px; }
+  .account-password-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .account-settings form { padding: 0; }.account-settings .passkey-form { padding: 16px; }
+  .account-device { flex-wrap: wrap; }.account-device > div:nth-child(2) { flex: 1 1 130px; }
+  .task-main strong { font-size: 15px; }.task-main > span, .task-main .task-followup-reason { font-size: 13px; }
+  .quick-grid strong { font-size: 14px; }.quick-grid small { font-size: 12px; }
+  .button, .button.small, .page-heading > .button, .settings-panel .button { font-size: 14px; min-height: 44px; }
+  .segmented button, .tabs button { font-size: 13px; }.field > span { font-size: 14px; }
+  .sidebar .workspace-tools .nav-item, .sidebar .workspace-overview .nav-item { font-size: 11px; }
+  .sidebar .nav-item span { font-size: 11px; }.workspace-group-title strong { font-size: 12px; }
+  .sidebar .workspace-subnav .nav-item span { font-size: 13px; }
+  .editor-dialog h2, .modal h2 { font-size: 24px; }.editor-dialog header p { font-size: 14px; }
+}
+@media (max-width: 420px) {
+  .account-settings-body { padding: 17px; }.account-section { padding: 17px; }
+  .account-owner { display: grid; grid-template-columns: 45px minmax(0, 1fr); align-items: center; }
+  .account-owner > button { grid-column: 1 / -1; margin-left: 0; width: 100%; justify-content: center; }
+  .account-settings h3 { font-size: 16px; }.account-device em { margin-left: 5px; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .panel, .stat-card { background-color: #fff; }
+}
