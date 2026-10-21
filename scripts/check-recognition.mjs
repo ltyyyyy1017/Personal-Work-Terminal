@@ -1,0 +1,76 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
+import ts from "typescript";
+import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+const folder = path.resolve("runtime/recognition-check"); await fs.mkdir(folder, { recursive: true });
+const names = ["errors", "invoice", "pdf", "reimbursement-recognition", "material-reader"];
+for (const name of names) {
+  let source = await fs.readFile(`lib/${name}.ts`, "utf8");
+  for (const dep of names) source = source.replaceAll(`"./${dep}"`, `"./${dep}.mjs"`);
+  await fs.writeFile(path.join(folder, `${name}.mjs`), ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText);
+}
+const { parseMaterialText: parse, summarizeRecognition: summary } = await import(pathToFileURL(path.join(folder, "reimbursement-recognition.mjs")));
+const invoiceText = `电子发票(普通发票)\n发票号码:12345678901234567890\n开票日期:2026年10月20日\n购买方信息\n名称:广州测试文化中心\n统一社会信用代码:91110000TEST000001X\n销售方信息\n名称:广州测试印刷公司\n统一社会信用代码:91440101MA1234567X\n项目名称\n*印刷服务*活动海报\n价税合计(小写)￥127.50\n报销人:测试申请人`;
+const doc = (text, id, name = `${id}.pdf`) => parse(text, { id, name, fingerprint: `hash-${id}`, method: "pdf-text" });
+const inv = doc(invoiceText, "invoice");
+assert.equal(inv.kind, "发票"); assert.equal(inv.fields.amount, "127.50"); assert.equal(inv.fields.buyer, "广州测试文化中心"); assert.equal(inv.fields.item, "活动海报"); assert.equal(inv.fields.date, "2026-10-20");
+assert.equal(inv.fields.taxId, "91110000TEST000001X"); assert.equal(inv.fields.name, "测试申请人");
+const columns = doc(invoiceText.replace("购买方信息\n名称:广州测试文化中心\n统一社会信用代码:91110000TEST000001X\n销售方信息\n名称:广州测试印刷公司\n统一社会信用代码:91440101MA1234567X", "购买方信息 销售方信息\n名称:广州测试文化中心 名称:广州测试印刷公司\n统一社会信用代码:91110000TEST000001X 统一社会信用代码:91440101MA1234567X"), "columns");
+assert.equal(columns.fields.buyer, "广州测试文化中心"); assert.equal(columns.meta.sellerName, "广州测试印刷公司");
+const pay = doc("微信支付\n支付成功\n￥127.50\n支付时间:2026-10-21 12:00\n交易单号:TESTORDER001\n商品说明:活动海报", "payment");
+const trip = doc("滴滴行程单\n出行日期:2026-10-20\n起点:学校南门\n终点:活动会场\n同行人:测试甲、测试乙\n总计:127.50\n人民币", "trip");
+assert.equal(pay.fields.amount, "127.50"); assert.equal(trip.fields.from, "学校南门"); assert.equal(trip.taxi, true);
+let s = summary([inv, pay, trip]); assert.equal(s.fields.amount.value, "127.50"); assert.equal(s.fields.date.value, "2026-10-21"); assert.equal(s.fields.currency.value, "CNY");
+s = summary([inv, { ...inv, id: "copy", fingerprint: "other-format" }, pay]); assert.equal(s.fields.amount.value, "127.50"); assert.equal(s.duplicates.copy, "invoice");
+s = summary([inv, { ...inv, id: "other-invoice", fingerprint: "different", fields: { ...inv.fields, invoiceNo: "99999999999999999999", buyer: "不同抬头" } }]); assert.ok(!s.fields.buyer); assert.ok(s.conflicts.some(c => c.field === "buyer")); assert.equal(s.fields.amount.value, "255.00");
+s = summary([inv, { ...pay, fields: { ...pay.fields, currency: "HKD" } }]); assert.equal(s.fields.currency.value, "HKD"); assert.equal(s.fields.amount.value, "127.50"); assert.ok(s.warnings.length);
+s = summary([pay, { ...pay, id: "foreign-payment", fingerprint: "foreign", reference: "FOREIGN002", fields: { ...pay.fields, currency: "HKD" } }]); assert.ok(!s.fields.amount); assert.ok(s.conflicts.some(c => c.field === "currency"));
+s = summary([pay, { ...pay, id: "payment2", fingerprint: "p2", reference: "TESTORDER002", fields: { ...pay.fields, amount: "12.50" } }]); assert.equal(s.fields.amount.value, "140.00");
+s = summary([pay, { ...pay, id: "payment2", fingerprint: "p2", reference: pay.reference }]); assert.equal(s.fields.amount.value, "127.50"); assert.ok(s.warnings.length);
+assert.ok(!summary([{ ...inv, fields: { ...inv.fields, invoiceNo: '12345678901234567890、22222222222222222222', amount: '255.00' } },{ ...inv, id:'part-copy',fingerprint:'part-copy' }]).fields.amount);
+assert.equal(doc("开票日期:2026-13-88", "invalid").fields.date, undefined);
+assert.ok(!summary([inv, doc("退款成功\n退款金额:127.50", "refund")]).fields.amount);
+assert.ok(!summary([{...inv,fields:{...inv.fields,invoiceNo:undefined}},{...inv,id:'inv2',fingerprint:'unreadable-number',fields:{...inv.fields,invoiceNo:undefined}}]).fields.amount);
+console.log("PASS invoice/payment/travel extraction, column headings, invoice deduplication, distinct payment sums, currency/buyer conflicts and date validation");
+
+GlobalFonts.registerFromPath("C:/Windows/Fonts/msyh.ttc", "Fixture Chinese");
+const canvas = createCanvas(1800, 1250), ctx = canvas.getContext("2d");
+ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = "#101010"; ctx.font = '38px "Fixture Chinese"';
+invoiceText.split("\n").forEach((line, i) => ctx.fillText(line, 70, 70 + i * 80));
+const png = await canvas.encode("png"); await fs.writeFile(path.join(folder, "测试发票.png"), png);
+const paymentCanvas = createCanvas(1800, 680), pc = paymentCanvas.getContext("2d");
+pc.fillStyle = "white"; pc.fillRect(0, 0, 1800, 680); pc.fillStyle = "#111"; pc.font = '42px "Fixture Chinese"';
+["微信支付", "支付成功", "￥127.50", "支付时间:2026-10-21 12:00", "交易单号:TESTORDER001", "商品说明:活动海报"].forEach((line,i) => pc.fillText(line, 70, 75+i*90));
+await fs.writeFile(path.join(folder, "测试支付记录.png"), await paymentCanvas.encode("png"));
+const scan = await PDFDocument.create(), page = scan.addPage([720, 500]), image = await scan.embedPng(png); page.drawImage(image, { x: 0, y: 0, width: 720, height: 500 });
+const scanned = await scan.save(); await fs.writeFile(path.join(folder, "测试扫描发票.pdf"), scanned);
+const { readMaterial } = await import(pathToFileURL(path.join(folder, "material-reader.mjs")));
+const actual = await readMaterial(png, "测试发票.png", "ocr-image");
+assert.equal(actual.method, "ocr", actual.warnings.join(";")); assert.equal(actual.fields.amount, "127.50"); assert.equal(actual.fields.invoiceNo, "12345678901234567890"); assert.ok(actual.fields.buyer); assert.ok(actual.fields.taxId);
+console.log("PASS real Chinese image OCR: invoice number, amount, buyer and tax ID");
+const scannedActual = await readMaterial(Buffer.from(scanned), "测试扫描发票.pdf", "ocr-pdf");
+assert.equal(scannedActual.method, "ocr", scannedActual.warnings.join(";")); assert.equal(scannedActual.fields.amount, "127.50"); assert.equal(scannedActual.fields.invoiceNo, "12345678901234567890");
+console.log("PASS scanned PDF rendering and OCR");
+const multi = await PDFDocument.create(); for (let i=0;i<2;i++) { const p=multi.addPage([720,500]); p.drawImage(await multi.embedPng(png),{x:0,y:0,width:720,height:500}); }
+const repeated = await readMaterial(Buffer.from(await multi.save()),"重复页扫描发票.pdf","repeated-pages"); assert.equal(repeated.fields.amount,"127.50");
+console.log("PASS repeated invoice pages are counted once");
+ctx.fillStyle='white';ctx.fillRect(0,0,1800,1250);ctx.fillStyle='#101010';ctx.font='38px "Fixture Chinese"';
+invoiceText.replace('12345678901234567890','22222222222222222222').replace('127.50','30.00').split('\n').forEach((line,i)=>ctx.fillText(line,70,70+i*80));
+const multiDifferent=await PDFDocument.create();for(const bytes of [png,await canvas.encode('png')]){const p=multiDifferent.addPage([720,500]);p.drawImage(await multiDifferent.embedPng(bytes),{x:0,y:0,width:720,height:500});}
+const different=await readMaterial(Buffer.from(await multiDifferent.save()),'多张发票.pdf','multi-invoices');assert.equal(different.fields.amount,'157.50');assert.equal(different.fields.invoiceNo,'12345678901234567890、22222222222222222222');
+console.log('PASS different invoice pages are aggregated with all invoice numbers preserved');
+const tooLong=await PDFDocument.create();for(let i=0;i<4;i++){const p=tooLong.addPage([720,500]);p.drawImage(await tooLong.embedPng(png),{x:0,y:0,width:720,height:500});}
+const partial=await readMaterial(Buffer.from(await tooLong.save()),'过长扫描件.pdf','partial');assert.equal(partial.fields.amount,undefined);assert.ok(partial.warnings.some(w=>w.includes('前三')));
+console.log('PASS partially scanned PDFs never use a partial sum as the complete document amount');
+const {normalizeToPdf} = await import(pathToFileURL(path.join(folder,"pdf.mjs")));
+const converted = await normalizeToPdf(await canvas.encode('webp'), 'image/webp', 'test.webp'); assert.equal((await PDFDocument.load(converted.bytes)).getPageCount(),1);
+console.log("PASS WebP attachment conversion for reimbursement packaging");
+const digital = await PDFDocument.create(), digitalPage = digital.addPage(), font = await digital.embedFont(StandardFonts.Helvetica);
+digitalPage.drawText("USD 45.00\nInvoice sample - electronic text document\n2026-10-21", { font, size: 16, x: 40, y: 740 });
+const digitalBytes = await digital.save(), electronic = await readMaterial(Buffer.from(digitalBytes), "electronic.pdf", "text-pdf");
+assert.equal(electronic.method, "pdf-text"); assert.equal(electronic.fields.currency, "USD");
+const corrupt = await readMaterial(Buffer.from("bad image"), "bad.png", "bad"); assert.equal(corrupt.method, "unreadable"); assert.ok(corrupt.warnings.length);
+console.log("PASS electronic PDF text extraction and corrupt-file fallback; all samples are synthetic and local");

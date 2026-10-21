@@ -1,0 +1,40 @@
+/* Explicit centering survives the CSS reset's margin: 0 on native dialogs. */
+dialog.modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  max-width: calc(100vw - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+html:has(dialog.modal[open]) {
+  overflow: hidden;
+}
+
+dialog.modal .modal-inner > header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fafcff;
+}
+
+dialog.modal .modal-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: #fff;
+}
+
+@media (max-width: 550px) {
+  dialog.modal {
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+}

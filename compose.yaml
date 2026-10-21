@@ -1,0 +1,16 @@
+services:
+  workbench:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3939:3939"
+    environment:
+      WORKBENCH_PASSWORD: ${WORKBENCH_PASSWORD:?请在 .env 中设置 WORKBENCH_PASSWORD}
+      WORKBENCH_USERNAME: ${WORKBENCH_USERNAME:?请在 .env 中设置 WORKBENCH_USERNAME}
+      WORKBENCH_PUBLIC_URL: ${WORKBENCH_PUBLIC_URL:-}
+      WORKBENCH_SECURE_COOKIE: ${WORKBENCH_SECURE_COOKIE:-true}
+      WORKBENCH_LOCK_SETUP: "true"
+    volumes:
+      - workbench_data:/app/data
+volumes:
+  workbench_data:

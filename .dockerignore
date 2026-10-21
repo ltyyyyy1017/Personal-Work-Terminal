@@ -1,0 +1,13 @@
+node_modules
+.next
+.pnpm-store
+data
+runtime
+preview
+assets
+scripts
+.git
+.env*
+*.docx
+*.pdf
+*.tsbuildinfo
