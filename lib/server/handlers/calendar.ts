@@ -1,4 +1,5 @@
 import { mutateStore, newId, nowISO, readStore } from "../../store";
+import {scheduleKdocs} from "../../kdocs-sync";
 import {tencentClient} from "../../tencent-docs";
 import {volunteerMemberIds} from "../../task-reporting";
 import {scheduleTeamSheetPush} from "../../team-sheet-sync";
@@ -161,7 +162,7 @@ export async function createTask(ctx: Ctx) {
     task.assignee=task.memberIds.map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
     s.tasks.push(task);
   });
-  scheduleTeamSheetPush();return json({ task });
+  scheduleTeamSheetPush();scheduleKdocs();return json({ task });
 }
 
 export async function patchTask(ctx: Ctx) {
@@ -180,6 +181,8 @@ export async function patchTask(ctx: Ctx) {
     if (!task) throw new AppError("任务不存在", 404);
     const previousStatus=task.status,previousReport=task.reportToTeamSheets;
     if(destination)task.sheetDestination=destination;
+    if("kdocsReporting" in body){const r=body.kdocsReporting as Record<string,unknown>;assert(task.department==="行政部"&&r&&typeof r.include==="boolean","行政部上報選項無效");if(r.include)assert(Number.isInteger(r.sheetId)&&s.kdocs?.enabled&&s.kdocs.mappings.some(m=>m.sheetId===r.sheetId),"請選擇已確認欄位的行政部原表頁籤");if(r.include&&s.kdocs?.projects?.some(p=>p.sheetId===r.sheetId))assert(s.kdocs.projects.some(p=>p.sheetId===r.sheetId&&p.id===r.projectId),"請選擇原表中已存在的項目");task.kdocsReporting={include:r.include,sheetId:r.include?Number(r.sheetId):undefined,projectId:r.include&&typeof r.projectId==="string"?r.projectId:undefined};}
+
     if (typeof body.title === "string") task.title = str(body.title).trim() || task.title;
     if (["todo", "doing", "waiting", "review", "done"].includes(body.status as string)) task.status = body.status==="review"||body.status==="done"?body.status:"doing";
     if ("assignee" in body) task.assignee = str(body.assignee, "", 60);
@@ -228,7 +231,7 @@ export async function patchTask(ctx: Ctx) {
     task.updatedAt = nowISO();
     return task;
   });
-  scheduleTeamSheetPush();return json({ task: result });
+  scheduleTeamSheetPush();scheduleKdocs();return json({ task: result });
 }
 
 export async function deleteTask(ctx: Ctx) {
@@ -237,7 +240,7 @@ export async function deleteTask(ctx: Ctx) {
     if (idx < 0) throw new AppError("任务不存在", 404);
     s.tasks.splice(idx, 1);
   });
-  scheduleTeamSheetPush();return json({ ok: true });
+  scheduleTeamSheetPush();scheduleKdocs();return json({ ok: true });
 }
 
 export { TAGS };

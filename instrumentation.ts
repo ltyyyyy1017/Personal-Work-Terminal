@@ -1,1 +1,1 @@
-export async function register(){if(process.env.NEXT_RUNTIME==="nodejs"&&process.env.WORKBENCH_SKIP_SYNC!=="true"){const {startTeamSheetWorker}=await import("./lib/team-sheet-worker");startTeamSheetWorker();}}
+export async function register(){if(process.env.NEXT_RUNTIME==="nodejs"&&process.env.WORKBENCH_SKIP_SYNC!=="true"){const {startTeamSheetWorker}=await import("./lib/team-sheet-worker");startTeamSheetWorker();const {startKdocsWorker}=await import("./lib/kdocs-sync");startKdocsWorker();}}
