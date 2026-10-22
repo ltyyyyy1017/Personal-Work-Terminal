@@ -106,6 +106,7 @@ function mergeSettings(current: Settings, body: Record<string, unknown>): Settin
   if (body.calendar && typeof body.calendar === "object") {
     const c = body.calendar as Record<string, unknown>;
     const target = next.calendar;
+    for(const key of ["myMemberIds","myNames"] as const)if(c[key]!==undefined){assert(Array.isArray(c[key])&&c[key].length<=(key==="myMemberIds"?100:20)&&c[key].every(v=>typeof v==="string"&&v.trim().length>0&&v.length<=100),"請選擇有效的本人身份或姓名別名");target[key]=[...new Set((c[key] as string[]).map(v=>v.trim()))];}
     if (c.weekStart === 0 || c.weekStart === 1) target.weekStart = c.weekStart as 0 | 1;
     if (c.defaultView === "month" || c.defaultView === "agenda") {
       target.defaultView = c.defaultView;
@@ -125,6 +126,8 @@ function mergeSettings(current: Settings, body: Record<string, unknown>): Settin
 export async function patchSettings(ctx: Ctx) {
   const body = (await ctx.body()) as Record<string, unknown>;
   const { result } = await mutateStore((s) => {
+    const calendar=body.calendar as Record<string,unknown>|undefined;
+    if(calendar&&Array.isArray(calendar.myMemberIds))assert(calendar.myMemberIds.every(id=>s.members.some(m=>m.id===id)),"本人身份須選擇現有成員");
     s.settings = mergeSettings(s.settings, body);
     return s.settings;
   });

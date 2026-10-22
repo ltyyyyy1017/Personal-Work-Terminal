@@ -123,6 +123,8 @@ export interface CalEvent {
 }
 
 export interface Task {
+  sourceResponsibleMemberIds?: string[];
+  sourceResponsibleNames?: string[];
   kdocsReporting?: {include:boolean;sheetId?:number;projectId?:string};
   kdocsOrigin?: {sheetId:number;row:number;recordId?:string;fingerprint?:string;projectId?:string};
   sourceRecorded?: boolean;
@@ -252,6 +254,8 @@ export interface Settings {
     exportFormats?:Record<string,{format:"standard"|"income-expense";title?:string}>;
   };
   calendar: {
+    myMemberIds?: string[];
+    myNames?: string[];
     weekStart: 0 | 1;
     defaultView: "month" | "agenda";
     reminderMinutes: number;
@@ -366,9 +370,10 @@ export interface NativeSheetLink {
  previous?:{col:number;value:string|number}[];
 }
 export interface KdocsMapping {
- sheetId:number;headerRow:number;titleColumn:number;memberColumn:number;dateColumn?:number;activityColumn?:number;noteColumn?:number;statusColumn?:number;ruleColumn?:number;detailColumn?:number;scoreColumn?:number;categoryColumn?:number;rule?:string;phase?:"pre"|"post";
+ sheetId:number;headerRow:number;titleColumn:number;memberColumn:number;dateColumn?:number;activityColumn?:number;noteColumn?:number;statusColumn?:number;ruleColumn?:number;detailColumn?:number;scoreColumn?:number;categoryColumn?:number;responsibleColumn?:number;rule?:string;phase?:"pre"|"post";
 }
 export interface KdocsState {
+  responsibilityVersion?:1;
   projects?:{sheetId:number;id:string;title:string}[];
   sourceRecords?:{key:string;title:string;names:string[];date:string;score?:number;category?:string;status:string}[];
   suppressedRefs?:string[];
