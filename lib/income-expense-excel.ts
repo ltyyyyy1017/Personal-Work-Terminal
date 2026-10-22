@@ -32,8 +32,8 @@ export function addIncomeExpenseSheet(wb:ExcelJS.Workbook,opts:{department:strin
     const r=i+4;
     ws.getCell(r,2).value=date?new Date(date+"T12:00:00Z"):null;ws.getCell(r,2).numFmt="yyyy.mm.dd";
     ws.getCell(r,4).value=item.name||a.category;
-    const companions=a.taxi?.companions.join("、");
-    const claimant=[a.submitter.trim()||"報銷人待補充",a.taxi?`同行人：${companions||"待補充"}`:""].filter(Boolean).join("\n");
+    const companions=[...new Set((a.taxi?.companions||[]).map(name=>name.trim()).filter(Boolean))].join("，");
+    const claimant=`${a.submitter.trim()||"報銷人待補充"}${companions?`（${companions}）`:""}`;
     ws.getCell(r,5).value=claimant;
     ws.getCell(r,6).value=typeof item.amount==="number"&&Number.isFinite(item.amount)?Math.round(item.amount*100)/100:null;
     const notes=[!date?"費用日期待補充":"",a.taxi?`起點：${a.taxi.from||"待補充"}\n終點：${a.taxi.to||"待補充"}`:"",item.note||a.reason||a.note||""].filter(Boolean).join("\n");
