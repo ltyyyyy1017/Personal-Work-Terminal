@@ -83,7 +83,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
       const { bytes } = plainText ? { bytes: buf } : await normalizeToPdf(buf, file.mime, file.originalName);
       const name = uniqueName(row.name, used);
       fs.writeFileSync(path.join(outDir, name), bytes);
-      manifest.push({ name, size: bytes.byteLength, kind: file.kind });
+      manifest.push({ name, size: bytes.byteLength, kind: file.kind, fileId:file.id, originalName:file.originalName });
       if (!plainText) pdfList.push(bytes);
     } catch (err) {
       failed.push(`${file.originalName}（${(err as Error).message}）`);

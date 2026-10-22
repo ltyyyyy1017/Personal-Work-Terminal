@@ -7,6 +7,8 @@ import { shortFileBase } from "../../naming";
 import { contentDisposition, resolveInside } from "../../files";
 import { assert } from "../../errors";
 import { toDateStr } from "../../date";
+import {buildMatterReimbursementWorkbook,type MatterMaterialRow} from "../../matter-reimbursement-excel";
+import type {ReimbActivity} from "../../types";
 import type { Ctx } from "../ctx";
 
 const running = new Set<string>();
@@ -23,9 +25,11 @@ export async function exportMatter(ctx: Ctx) {
   running.add(matter.id);
   try {
     const zip=new JSZip(), top=zip.folder(`${shortFileBase(matter.title,100)||"事务"}_全部报销材料`)!;
-    const catalog=[`事务：${matter.title}`,`关联报销：${activities.length} 笔`,"按实际报销人及报销记录分文件夹，包含各笔明细表与材料原件。",""];
+    const catalog=[`事务：${matter.title}`,`关联报销：${activities.length} 笔`,"按实际报销人分文件夹，材料直接存放；统计统一见根目录的事务报销统计表.xlsx。",""];
     let bytesRead=0, total=0;
-    const exported: {id:string;submitter:string;updatedAt:string}[]=[];
+    const exported: ReimbActivity[]=[];
+    const materials: MatterMaterialRow[]=[];
+    const claimantFolders=new Map<string,string>(),usedFolders=new Set<string>();
     for (const [index,original] of activities.entries()) {
       // Recheck association before each build so a moved record cannot leak into the wrong bundle.
       const current=readStore().activities.find(a=>a.id===original.id);
@@ -36,15 +40,27 @@ export async function exportMatter(ctx: Ctx) {
       const dir=resolveInside(dirs.exports,path.relative(dirs.exports,path.resolve(dirs.root,output.dir)));
       const packed=await JSZip.loadAsync(fs.readFileSync(resolveInside(dir,output.zipName)));
       const claimant=activity.submitter.trim()||"未填写";
-      const prefix=`报销人-${shortFileBase(claimant,60)}/${String(index+1).padStart(2,"0")}_${shortFileBase(activity.name,90)||"报销记录"}`;
+      if(!claimantFolders.has(claimant)){
+        const base=`报销人-${shortFileBase(claimant,60)}`;let candidate=base,n=2;
+        while(usedFolders.has(candidate))candidate=`${base}(${n++})`;
+        claimantFolders.set(claimant,candidate);usedFolders.add(candidate);
+      }
+      const prefix=claimantFolders.get(claimant)!;
       const folder=top.folder(prefix)!;
+      const filePrefix=`${String(index+1).padStart(2,"0")}_${shortFileBase(activity.name,36)||"报销记录"}_`;
       for (const entry of Object.values(packed.files)) {
         if(entry.dir)continue;
         const relative=entry.name.split("/").slice(1).join("/");
         assert(relative&&!relative.split("/").some(p=>p===".."||p==="."),"材料包中存在非法文件名");
+        if(relative===output.xlsxName||relative==="材料清单.txt")continue;
+        assert(!relative.includes("/"),"单笔材料包中存在多余目录，请重新生成",422);
         const bytes=await entry.async("nodebuffer");bytesRead+=bytes.length;
         assert(bytesRead<=128*1024*1024,"材料转换后超过整包处理上限，请分别导出报销记录",413);
-        folder.file(relative,bytes);
+        const name=`${filePrefix}${relative}`;
+        folder.file(name,bytes);
+        const material=output.manifest.find(m=>m.name===relative);
+        const source=material?.originalName||(material?.kind==="合并件"?"由报销材料生成":"");
+        materials.push({claimant,activity:activity.name,kind:material?.kind||"其他",path:`${prefix}/${name}`,originalName:source});
       }
       total+=output.totalAmount;
       catalog.push(`${index+1}. 报销人：${claimant}；经办人：${activity.handler||"未填写"}；报销：${activity.name}；金额：¥${output.totalAmount.toFixed(2)}`,`   文件夹：${prefix}`,...output.warnings.map(w=>`   待核对：${w}`),"");
@@ -53,6 +69,7 @@ export async function exportMatter(ctx: Ctx) {
     assert(latest.length===exported.length&&latest.every(a=>exported.some(old=>old.id===a.id&&old.updatedAt===a.updatedAt&&a.department===matter.department)),"事务的关联报销已变化，请重新生成",409);
     catalog.push(`合计：¥${total.toFixed(2)}`,`生成时间：${new Date().toISOString()}`);
     top.file("事务报销清单.txt",catalog.join("\r\n"));
+    top.file("事务报销统计表.xlsx",await buildMatterReimbursementWorkbook(matter,exported,materials));
     const claimants=[...new Set(exported.map(a=>a.submitter.trim()||"未填写"))], joined=claimants.join("、");
     const label=shortFileBase(joined,60)+(new TextEncoder().encode(joined).length>60?`等${claimants.length}人`:"");
     const name=`${shortFileBase(matter.title,80)}_报销人-${label}_全部报销材料_${toDateStr(new Date()).replace(/-/g,"")}.zip`;

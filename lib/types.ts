@@ -71,7 +71,7 @@ export interface ReimbOutput {
   mergedName?: string | null;
   totalAmount: number;
   fileCount: number;
-  manifest: { name: string; size: number; kind: string }[];
+  manifest: { name: string; size: number; kind: string; fileId?: string; originalName?: string }[];
   warnings: string[];
 }
 
