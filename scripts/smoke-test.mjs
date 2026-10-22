@@ -47,7 +47,7 @@ try{
   assert.ok(!(await readFile(path.join(directory,"credentials.enc.json"),"utf8")).includes("fake-test-secret"));
   assert.equal((await json("workspace/credential","POST",{id:"test-site",authorization:(await json("workspace/credential/authorize","POST",{id:"test-site",operation:"copy",current:password})).authorization})).password,"fake-test-secret");
   const participants=workspace.members.filter(m=>m.department==="运营部").map(m=>m.id);
-  await json(`members/${participants[0]}`,"PATCH",{name:"测试成员改名",phone:"000-test",preference:"摄影",note:"编辑验证"});
+  await json(`members/${participants[0]}`,"PATCH",{name:"测试成员改名",role:"干事",phone:"000-test",preference:"摄影",note:"编辑验证"});
   await json("members/order","PATCH",{ids:[participants[1],participants[0]]});
   const edited=await json("state");assert.equal(edited.members[0].id,participants[1]);assert.equal(edited.members.find(m=>m.id===participants[0]).preference,"摄影");
   const avatarBytes=await sharp({create:{width:160,height:90,channels:3,background:"#5599dd"}}).png().toBuffer();
@@ -111,7 +111,7 @@ try{
   assert.deepEqual(task.memberIds,participants);
   assert.equal((await fetch(`${base}/api/tasks/${task.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({memberIds:["missing-member"]})})).status,400);
   assert.deepEqual((await json("state")).tasks.find(t=>t.id===task.id).memberIds,participants);
-  for(const status of ["todo","doing","waiting","review","done"]){const patched=await json(`tasks/${task.id}`,"PATCH",{status,...(status==="done"?{volunteerHours:Object.fromEntries(participants.map(id=>[id,2])),volunteerEntered:false}:{})});assert.equal(patched.task.status,["todo","waiting"].includes(status)?"doing":status);}
+  for(const status of ["todo","doing","waiting","review","done"]){const patched=await json(`tasks/${task.id}`,"PATCH",{status,...(status==="done"?{reportToTeamSheets:true,volunteerHours:Object.fromEntries(participants.map(id=>[id,2])),volunteerEntered:false}:{})});assert.equal(patched.task.status,["todo","waiting"].includes(status)?"doing":status);}
   assert.equal((await fetch(`${base}/api/tasks`,{method:"POST",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({title:"invalid",link:"javascript:alert(1)"})})).status,400);
   await startRestart();
   assert.equal((await json("state")).members.find(m=>m.id===participants[0]).avatar,avatarMember.avatar);
@@ -120,6 +120,20 @@ try{
   assert.equal((await json("state")).tasks.find(t=>t.id===task.id).reviewRequired,false);
   assert.deepEqual((await json("state")).tasks.find(t=>t.id===task.id).memberIds,participants);
   assert.equal((await json("workspace/credential","POST",{id:"test-site",authorization:(await json("workspace/credential/authorize","POST",{id:"test-site",operation:"copy",current:password})).authorization})).password,"fake-test-secret");
+  const privateTask=(await json("tasks","POST",{title:"私人完成備忘",department:"运营部",reviewRequired:false,memberIds:[]})).task;
+  assert.equal(privateTask.reportToTeamSheets,undefined);
+  const undecided=await fetch(`${base}/api/tasks/${privateTask.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({status:"done"})});assert.equal(undecided.status,400);
+  const privateDone=(await json(`tasks/${privateTask.id}`,"PATCH",{status:"done",reportToTeamSheets:false})).task;assert.equal(privateDone.status,"done");assert.equal(privateDone.reportToTeamSheets,false);assert.equal(privateDone.volunteerHours,undefined);assert.equal(privateDone.volunteerEntered,false);
+  await json(`tasks/${privateTask.id}`,"DELETE");
+  await json(`members/${participants[0]}`,"PATCH",{role:"副部长"});
+  const leadership=(await json("tasks","POST",{title:"部長與幹事共同出工",department:"运营部",memberIds:participants})).task;
+  const approvedLeadership=(await json(`tasks/${leadership.id}`,"PATCH",{status:"done",reportToTeamSheets:true,volunteerHours:{[participants[1]]:1.5},volunteerEntered:true})).task;assert.deepEqual(approvedLeadership.volunteerHours,{[participants[1]]:1.5});
+  const onlyLeader=(await json("tasks","POST",{title:"部長任務只記詳情",department:"运营部",memberIds:[participants[0]]})).task;
+  const leaderDone=(await json(`tasks/${onlyLeader.id}`,"PATCH",{status:"done",reportToTeamSheets:true})).task;assert.equal(leaderDone.status,"done");assert.equal(leaderDone.volunteerEntered,false);
+  const revisedPrivate=(await json(`tasks/${leadership.id}`,"PATCH",{reportToTeamSheets:false})).task;assert.equal(revisedPrivate.volunteerHours,undefined);assert.equal(revisedPrivate.volunteerEntered,false);
+  const privateWork=(await json("work-logs","POST",{title:"私人任務關聯出工",date:"2026-10-20",start:"14:00",end:"15:00",memberIds:participants,taskId:leadership.id,status:"done",volunteerHours:{[participants[1]]:5},volunteerConfirmed:true})).workLog;assert.deepEqual(privateWork.volunteerHours,{});assert.equal(privateWork.volunteerConfirmed,false);
+  await json(`work-logs/${privateWork.id}`,"DELETE");await json(`tasks/${leadership.id}`,"DELETE");await json(`tasks/${onlyLeader.id}`,"DELETE");await json(`members/${participants[0]}`,"PATCH",{role:"干事"});
+  console.log("PASS completion requires reporting choice; personal records need no hours; leader-only/mixed tasks keep blank leadership hours; private linked work excluded");
   console.log("PASS legacy task state normalization, approval and persistence across server restart");
   const passed=(await json("state")).tasks.find(t=>t.id===task.id);assert.equal(passed.volunteerHours[participants[0]],2);
   await json(`tasks/${task.id}`,"PATCH",{volunteerEntered:true});assert.equal((await json("state")).tasks.find(t=>t.id===task.id).volunteerEntered,true);

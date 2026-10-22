@@ -70,6 +70,7 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
       return json({teamSheets:s.teamSheets,matters:s.matters,tasks:s.tasks.filter(t=>!t.sourceMissing),members:s.members,workLogs:s.workLogs,resources:workspace.resourceViews(),events:s.events,activities:s.activities,docs:s.docs,settings:s.settings,log:s.log.slice(0,8),system:{...storageInfo(),authRequired:authRequired()},demo:s.tasks.some(t=>t.demo)||s.events.some(e=>e.demo)});
     }
     if(key==="workspace/departments"&&method==="GET")return structure.departments();
+    if(key==="team-sheets/destinations"&&method==="GET")return await teamSheets.destinations();
     if(key==="team-sheets"&&method==="GET")return teamSheets.status();
     if(key==="team-sheets/connect"&&method==="POST")return await teamSheets.begin();
     if(key==="team-sheets/authorize"&&method==="POST")return await teamSheets.authorize(ctx);

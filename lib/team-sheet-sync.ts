@@ -1,3 +1,4 @@
+import {syncNativeTask} from "./team-sheet-native";
 import fs from "node:fs";
 import path from "node:path";
 import {readStore,mutateStore,newId,nowISO,dirs,appendLog} from "./store";
@@ -19,24 +20,46 @@ export async function pullTeamSheets(client:Client,config:TeamSheetState){
  for(const s of taskInfo.sheets)if(s.sheet_type==="worksheet"&&!s.hidden&&!/基准模板|基準模板/.test(s.sheet_name))taskSnapshots.push(await readSheet(client,config.taskFileId,s));
  for(const s of hourInfo.sheets)if(s.sheet_type==="worksheet"&&!s.hidden&&!/基准模板|基準模板/.test(s.sheet_name))hourSnapshots.push(await readSheet(client,config.hoursFileId,s));
  const folder=path.join(dirs.root,"integrations","tencent-docs");fs.mkdirSync(folder,{recursive:true,mode:0o700});atomicWrite(path.join(folder,"latest-snapshot.json"),JSON.stringify({at:nowISO(),taskSnapshots,hourSnapshots}));
- const current=readStore(),assignments=parseAssignments(taskSnapshots,config.taskFileId,config.department,current.members,config.academicYear,config.taskSheetId),volunteers=parseVolunteer(hourSnapshots,config.hoursFileId,config.department,current.members,config.academicYear,assignments,config.hoursSheetId);
+ const current=readStore();
+ // Exclude only rows added by this workbench. Adopted original rows remain sources.
+ const locations=new Map<string,number>();
+ const sourceSnapshots=(list:SheetSnapshot[],file:string)=>list.map(snapshot=>{
+  const excluded=new Set<number>(),rows=sheetRows(snapshot.cells);
+  for(const [taskId,links]of Object.entries(current.teamSheets?.nativeLinks||{}))for(const link of links)if(link.file===file&&link.sheet===snapshot.sheet.sheet_id){
+   const match=[...rows].filter(([,r])=>link.after.every(c=>(r.get(c.col)??"")===c.value));const row=match.length===1?match[0][0]:link.row;
+   locations.set(`${taskId}:${link.kind}:${link.memberId}:${link.sheet}`,row);if(link.owned)excluded.add(row);
+  }
+  return {...snapshot,cells:snapshot.cells.filter(c=>!excluded.has(c.row))};
+ });
+ const assignments=parseAssignments(sourceSnapshots(taskSnapshots,config.taskFileId),config.taskFileId,config.department,current.members,config.academicYear,config.taskSheetId),volunteers=parseVolunteer(sourceSnapshots(hourSnapshots,config.hoursFileId),config.hoursFileId,config.department,current.members,config.academicYear,assignments,config.hoursSheetId);
  await mutateStore(s=>{
   assert(s.teamSheets?.taskFileId===config.taskFileId&&s.teamSheets.hoursFileId===config.hoursFileId,"同步設定已改動，請重試",409);
-  const stamp=nowISO(),seen=new Set(assignments.map(a=>a.key)),conflicts:string[]=[];let added=0;
+  for(const [taskId,links]of Object.entries(s.teamSheets.nativeLinks||{}))for(const link of links){const row=locations.get(`${taskId}:${link.kind}:${link.memberId}:${link.sheet}`);if(row!==undefined)link.row=row;}
+  const assignmentKey=(a:typeof assignments[number])=>{
+   const prior=s.tasks.find(t=>t.sheetOrigin?.task?.sheetId===a.sheetId&&t.sourceRefs?.some(r=>r.startsWith("td:assignment:"))&&a.memberIds.some(id=>t.memberIds?.includes(id)&&((t.sheetOrigin!.task!.rows?.[id]??t.sheetOrigin!.task!.row)===a.rows?.[id])));
+   return prior?.sourceRefs?.find(r=>r.startsWith("td:assignment:"))||a.key;
+  };
+  const items:{key:string;matter:string;task:Omit<Task,"id"|"createdAt"|"updatedAt"|"matterId">}[]=assignments.map(a=>({key:assignmentKey(a),matter:a.matter,task:{title:a.title,department:config.department,memberIds:a.memberIds,assignee:a.names.join("、"),due:a.date||undefined,workDate:a.date,status:a.done?"review":"doing",reviewRequired:true,priority:"normal",note:`來源：團學任務分工 · ${a.matter}\n原表狀態：${a.done?"已完成，待工作台確認":"未完成"}\n${a.phase||""}`,sourceRefs:[assignmentKey(a),...a.refs],sheetOrigin:a.sheetId?{task:{sheetId:a.sheetId,row:Object.values(a.rows||{})[0]??0,rows:a.rows}}:undefined}}));
+  for(const r of volunteers.records)if(!r.localTaskId){
+   const prior=s.tasks.find(t=>t.sheetOrigin?.hours?.sheetId===r.sheetId&&t.sheetOrigin?.hours?.row===r.row&&(r.memberId?t.memberIds?.includes(r.memberId):t.assignee===r.name)&&t.sourceRefs?.some(ref=>ref.startsWith("td:hours-task:")));
+   const key=prior?.sourceRefs?.find(ref=>ref.startsWith("td:hours-task:"))||`td:hours-task:${r.id}`;items.push({key,matter:r.matterTitle,task:{title:(r.detail.replace(/\d+(?:\.\d+)?\s*(?:h|小时|小時)/gi,"").trim()||`${r.matterTitle} · 出工記錄`).slice(0,180),department:config.department,memberIds:r.memberId?[r.memberId]:[],assignee:r.name,workDate:r.date,due:r.date||undefined,status:"review",reviewRequired:true,priority:"normal",note:`來源：志願時匯總 · ${r.matterTitle}\n原表姓名：${r.name}\n${r.detail}\n來源時長僅供參考，需確認後才計入。`.slice(0,500),sourceRefs:[key,...r.sourceRefs],sourceHours:r.hours===null||!r.memberId?undefined:{[r.memberId]:r.hours},sheetOrigin:r.sheetId&&r.row!==undefined?{hours:{sheetId:r.sheetId,row:r.row}}:undefined}});
+  }
+  const stamp=nowISO(),seen=new Set(items.map(a=>a.key)),conflicts:string[]=[];let added=0;
   s.teamSheets.importHashes??={};
-  for(const a of assignments){
-   let matter=s.matters.find(m=>m.department===config.department&&normalized(m.title)===normalized(a.matter));if(!matter){matter={id:newId("matter"),title:a.matter,department:config.department,note:"從團學任務分工表匯入",createdAt:stamp,updatedAt:stamp};s.matters.push(matter);}
+  for(const a of items){
+   let matter=s.matters.find(m=>m.department===config.department&&normalized(m.title)===normalized(a.matter));if(!matter){matter={id:newId("matter"),title:a.matter,department:config.department,note:"按原表頁籤分類匯入",createdAt:stamp,updatedAt:stamp};s.matters.push(matter);}
    const existing=s.tasks.find(t=>t.sourceRefs?.includes(a.key));
    if(existing?.sourceMissing){existing.sourceMissing=false;existing.updatedAt=stamp;}
-   const item:Task={id:existing?.id||`td_task_${digest(a.key)}`,title:a.title,department:config.department,matterId:matter.id,memberIds:a.memberIds,assignee:a.names.join("、"),due:a.date||undefined,workDate:a.date,status:a.done?"done":"doing",reviewRequired:!a.done,priority:"normal",note:`來源：團學任務分工 · ${a.matter}\n${a.phase?`時間／階段：${a.phase}\n`:""}執行人：${a.names.join("、")}\n來源記錄由線上表格同步；志願時以匯總表為準。`,sourceRefs:[a.key,...a.refs],sourceMissing:false,createdAt:existing?.createdAt||stamp,updatedAt:existing?.updatedAt||stamp};
-   const content=(t:Task)=>{const {updatedAt,createdAt,organization,sourceMissing,...rest}=t;return digest(rest);},legacy=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||[content(existing),legacy(existing),legacy({...existing,organization:undefined})].includes(last.local);
-   if(existing){const currentHash=content(existing);if(!canUpdate){if(![nextHash,legacy(item)].includes(last.source))conflicts.push(`${a.matter} · ${a.title}：本機及來源均有修改，已保留本機版本，請核對。`);}else if(currentHash!==nextHash)Object.assign(existing,item,{updatedAt:stamp});}
+   if(existing)existing.sheetOrigin=a.task.sheetOrigin;
+   const item:Task={...a.task,id:existing?.id||`td_task_${digest(a.key)}`,matterId:matter.id,sourceMissing:false,createdAt:existing?.createdAt||stamp,updatedAt:existing?.updatedAt||stamp};
+   const content=(t:Task)=>{const {updatedAt,createdAt,organization,sourceMissing,sheetOrigin,...rest}=t;return digest(rest);},legacy=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||[content(existing),legacy(existing),legacy({...existing,organization:undefined})].includes(last.local);
+   if(existing){const currentHash=content(existing);if(!canUpdate){if(![nextHash,legacy(item)].includes(last.source))conflicts.push(`${a.matter} · ${a.task.title}：本機及來源均有修改，已保留本機版本，請核對。`);}else if(currentHash!==nextHash)Object.assign(existing,item,{updatedAt:stamp});}
    else{s.tasks.push(item);added++;}
    if(canUpdate)s.teamSheets.importHashes[item.id]={local:content(existing||item),source:nextHash};
   }
-  for(const t of s.tasks)if(t.sourceRefs?.some(r=>r.startsWith("td:assignment:"))&&!t.sourceRefs.some(r=>seen.has(r)))t.sourceMissing=true;
-  s.teamSheets.volunteers=volunteers.records;s.teamSheets.issues=[...volunteers.issues,...conflicts];s.teamSheets.importedCount=assignments.length;s.teamSheets.lastPullAt=stamp;s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;
-  if(added)appendLog(s,"sync",`團學分工匯入 ${added} 項，志願時按來源編號更新，沒有累加重複記錄`);
+  for(const t of s.tasks)if(t.sourceRefs?.some(r=>r.startsWith("td:assignment:")||r.startsWith("td:hours-task:"))&&!t.sourceRefs.some(r=>seen.has(r)))t.sourceMissing=true;
+  s.teamSheets.volunteers=volunteers.records;s.teamSheets.issues=[...volunteers.issues,...conflicts];s.teamSheets.importedCount=items.length;s.teamSheets.lastPullAt=stamp;s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;
+  if(added)appendLog(s,"sync",`團學分工匯入 ${added} 項，按原表頁籤分類；來源時長僅供參考，確認前不計入統計`);
  });
 }
 async function managedSheet(client:Client,config:TeamSheetState,kind:"task"|"hours"){
@@ -45,7 +68,7 @@ async function managedSheet(client:Client,config:TeamSheetState,kind:"task"|"hou
  if(!sheet){
   // Recover an already-created integration tab only when all header cells match.
   for(const candidate of info.sheets.filter(s=>s.sheet_name.startsWith(base))){const d=await client.read(file,candidate.sheet_id,0,12);const row=sheetRows(d.cells).get(0);if(row&&header.every((h,i)=>row.get(i)===h)){sheet=candidate;break;}}
-  if(!sheet){let name=base,index=2;while(info.sheets.some(s=>s.sheet_name===name))name=`${base}-${index++}`;const added=await client.add(file,name);sheet=(await client.info(file)).sheets.find(s=>s.sheet_id===added.sheet_id);assert(sheet,"新分表尚未可讀，請稍後重新同步",502);}
+  assert(sheet,"舊同步分表已不存在；請在任務通過頁選擇原有頁籤，不會自動新建分表",409);
   const selected=sheet;await mutateStore(s=>{assert(s.teamSheets,"請先設定同步");s.teamSheets[field]=selected.sheet_id;});config[field]=sheet.sheet_id;
  }
  const d=await client.read(file,sheet.sheet_id,0,12),row=sheetRows(d.cells).get(0);
@@ -53,15 +76,16 @@ async function managedSheet(client:Client,config:TeamSheetState,kind:"task"|"hou
  else assert(header.every((h,i)=>row.get(i)===h),"工作台同步分表的欄位已被改動，已停止寫入以保護資料",409);
  return {file,sheet,header};
 }
-export function eligibleTasks(s:Store){const c=s.teamSheets;return !c?[]:s.tasks.filter(t=>t.department===c.department&&!t.demo&&!t.sourceRefs?.some(r=>r.startsWith("td:"))&&t.createdAt>=c.enabledAt);}
-function taskHash(s:Store,t:Task){return digest(taskSyncPayload(t,s.members,s.matters.find(m=>m.id===t.matterId)?.title||t.activityName||"未分類事項"));}
-export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>c.taskHashes[t.id]!==taskHash(s,t)).length+Object.keys(c.taskHashes).filter(id=>!tasks.some(t=>t.id===id)).length;}
-export async function pushTeamSheets(client:Client,config:TeamSheetState){
- const before=readStore(),tasks=eligibleTasks(before),changed=tasks.filter(t=>config.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(config.taskHashes).filter(id=>!tasks.some(t=>t.id===id));
+function legacyEligibleTasks(s:Store){const c=s.teamSheets;return !c?[]:s.tasks.filter(t=>t.department===c.department&&!t.demo&&!t.sheetDestination&&!t.sourceRefs?.some(r=>r.startsWith("td:"))&&t.createdAt>=c.enabledAt&&t.reportToTeamSheets!==false&&Object.hasOwn(c.taskHashes,t.id));}
+function taskHash(s:Store,t:Task){return digest([t.sheetDestination,taskSyncPayload(t,s.members,s.matters.find(m=>m.id===t.matterId)?.title||t.activityName||"未分類事項")]);}
+export function eligibleTasks(s:Store){return [...legacyEligibleTasks(s),...s.tasks.filter(t=>t.department===s.teamSheets?.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo)];}
+export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>c.taskHashes[t.id]!==taskHash(s,t)).length+[...new Set([...Object.keys(c.taskHashes),...Object.keys(c.nativeLinks||{})])].filter(id=>!tasks.some(t=>t.id===id)).length;}
+async function pushLegacySheets(client:Client,config:TeamSheetState){
+ const before=readStore(),tasks=legacyEligibleTasks(before),changed=tasks.filter(t=>config.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(config.taskHashes).filter(id=>!before.teamSheets?.nativeLinks?.[id]&&!tasks.some(t=>t.id===id));
  // Track a first publication before sending it. If the second document fails
  // and the task is then deleted, its partially published rows still get cleared.
  if(changed.length)await mutateStore(s=>{assert(s.teamSheets?.enabled&&s.teamSheets.taskFileId===config.taskFileId&&s.teamSheets.hoursFileId===config.hoursFileId,"同步設定已改動",409);for(const t of changed)s.teamSheets.taskHashes[t.id]??="";});
- const taskTarget=await managedSheet(client,config,"task"),hoursTarget=await managedSheet(client,config,"hours");if(!changed.length&&!removed.length)return;const affected=new Set([...changed.map(t=>t.id),...removed]);
+ if(!changed.length&&!removed.length)return;const taskTarget=await managedSheet(client,config,"task"),hoursTarget=await managedSheet(client,config,"hours");const affected=new Set([...changed.map(t=>t.id),...removed]);
  const writes:{file:string;sheet:SheetInfo;values:SheetCell[];expected:Map<string,(string|number)[]>;keyCol:number}[]=[];
  for(const [kind,target]of [["task",taskTarget],["hours",hoursTarget]]as const){
   const snapshot=await readSheet(client,target.file,target.sheet),rows=sheetRows(snapshot.cells),keyCol=kind==="task"?7:9,existing=new Map<string,{row:number;values:(string|number)[]}>();let nextRow=1;
@@ -88,6 +112,15 @@ export async function pushTeamSheets(client:Client,config:TeamSheetState){
   if(target.keyCol===9)verifiedHours=parseVolunteer([verified],config.hoursFileId,config.department,before.members,config.academicYear,[],target.sheet.sheet_id).records;
  }
  await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");for(const t of changed)s.teamSheets.taskHashes[t.id]=taskHash(before,t);for(const id of removed)delete s.teamSheets.taskHashes[id];if(verifiedHours)s.teamSheets.volunteers=[...s.teamSheets.volunteers.filter(r=>!r.localTaskId),...verifiedHours];s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;});
+}
+export async function pushTeamSheets(client:Client,config:TeamSheetState){
+ // Finish cleanup in legacy tabs before migrating an opted-in task to original pages.
+ await pushLegacySheets(client,config);
+ const before=readStore(),tasks=before.tasks.filter(t=>t.department===config.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo);
+ const changed=tasks.filter(t=>before.teamSheets?.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(before.teamSheets?.nativeLinks||{}).filter(id=>!tasks.some(t=>t.id===id));
+ for(const t of changed){await syncNativeTask(client,config,t,t.id);await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");s.teamSheets.taskHashes[t.id]=taskHash(before,t);});}
+ for(const id of removed){await syncNativeTask(client,config,undefined,id);await mutateStore(s=>{if(s.teamSheets)delete s.teamSheets.taskHashes[id];});}
+ if(changed.length||removed.length)await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;}});
 }
 export async function runTeamSheetSync(mode:"all"|"pull"|"push"="all"){
  while(job.running)try{await job.running;}catch{/* A later request can retry a failed run. */}

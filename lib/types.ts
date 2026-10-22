@@ -123,6 +123,11 @@ export interface CalEvent {
 }
 
 export interface Task {
+  sheetDestination?: {taskSheetId:string;hoursSheetId:string;hoursKind:"online"|"offline"};
+  sheetOrigin?: {task?:{sheetId:string;row:number;rows?:Record<string,number>};hours?:{sheetId:string;row:number}};
+  sourceHours?: Record<string,number>;
+  /** Undefined: ask on completion; false: private record without volunteer hours. */
+  reportToTeamSheets?: boolean;
   workDate?: string;
   sourceMissing?: boolean;
   sourceRefs?: string[];
@@ -342,11 +347,17 @@ export interface ResourceView extends WorkResource {
 
 export interface SyncedVolunteer {
  id:string;memberId?:string;name:string;title:string;matterTitle:string;date:string;
- hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;localVersion?:string;
+ sheetId?:string;row?:number;hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;localVersion?:string;
 }
 export interface TeamSheetState {
+ nativeLinks?:Record<string,NativeSheetLink[]>;
  enabled:boolean;department:string;taskFileId:string;hoursFileId:string;academicYear:number;enabledAt:string;
  taskSheetId?:string;hoursSheetId?:string;lastPullAt?:string;lastPushAt?:string;lastError?:string;lastErrorAt?:string;
  importHashes?:Record<string,{local:string;source:string}>;
  volunteers:SyncedVolunteer[];issues:string[];importedCount:number;taskHashes:Record<string,string>;
+}
+export interface NativeSheetLink {
+ file:string;sheet:string;kind:"task"|"hours";memberId:string;row:number;owned:boolean;
+ before:{col:number;value:string|number}[];after:{col:number;value:string|number}[];
+ previous?:{col:number;value:string|number}[];
 }

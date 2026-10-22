@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),ts=require('typescript'),Module=require('node:module');
+const resolve=Module._resolveFilename;Module._resolveFilename=function(name,...rest){return resolve.call(this,name.startsWith('@/')?path.join(process.cwd(),name.slice(2)):name,...rest);};
+for(const extension of ['.ts','.tsx'])require.extensions[extension]=function(m,file){m._compile(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,file);};
+const React=require('react'),{renderToStaticMarkup:render}=require('react-dom/server');
+const {MatterBoard}=require('../components/matter-board.tsx'),TaskApproval=require('../components/task-approval.tsx').default,{isVolunteerLeader}=require('../lib/task-reporting.ts');
+const noop=()=>{},matter={id:'m',title:'測試大型事項',department:'运营部'},tasks=[{id:'a',title:'不應在概覽顯示的子任務',matterId:'m',status:'done'},{id:'b',title:'第二個子任務',matterId:'m',status:'review'},{id:'c',title:'獨立任務不應展開',status:'doing'}];
+const overview=render(React.createElement(MatterBoard,{matters:[matter],tasks,onNew:noop,onEdit:noop,onAdd:noop,renderTasks:()=>{throw Error('Overview must not render child task lists');}}));
+assert.ok(overview.includes('測試大型事項'));assert.ok(overview.includes('aria-valuenow="50"'));assert.ok(overview.includes('1 / 2 項已完成'));assert.ok(overview.includes('1 項待你審核'));assert.ok(overview.includes('未歸入事項'));for(const t of tasks)assert.ok(!overview.includes(t.title));
+for(const role of ['部长','副部长','部長','副部長','正負責人'])assert.equal(isVolunteerLeader({role}),true);assert.equal(isVolunteerLeader({role:'干事'}),false);
+const people=[{id:'leader',name:'測試部長',department:'运营部',role:'副部長'},{id:'worker',name:'測試幹事',department:'运营部',role:'干事'}],task={id:'t',title:'完成選擇測試',department:'运营部',status:'review',memberIds:['leader','worker']};
+const approval=(t)=>render(React.createElement(TaskApproval,{task:t,members:people,tasks:[],onClose:noop,onSaved:noop}));
+const pending=approval(task);assert.ok(pending.includes('這項任務是否計入團委表格'));assert.ok(pending.includes('僅個人紀錄'));assert.ok(!pending.includes('name="hours_'));
+const include=approval({...task,reportToTeamSheets:true});assert.ok(!include.includes('name="hours_leader"'));assert.ok(include.includes('name="hours_worker"'));assert.ok(include.includes('時長留空'));
+const personal=approval({...task,reportToTeamSheets:false});assert.ok(!personal.includes('name="hours_'));assert.ok(!personal.includes('name="workDate"'));assert.ok(personal.includes('完成並僅作個人紀錄'));
+console.log('PASS compact matter overview hides child tasks, shows progress/review counts, reporting choices and leadership/private completion forms');
