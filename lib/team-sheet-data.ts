@@ -54,7 +54,7 @@ export function parseVolunteer(snapshots:SheetSnapshot[],file:string,department:
    let date=sheetDate(rowText(row,7),year)||sheetDate(detail,year);if(!date){const matching=assignments.filter(a=>a.names.some(n=>normalized(n)===normalized(name))&&normalized(a.title)===normalized(titleValue)&&a.date);if(matching.length===1)date=matching[0].date;}
    const localTaskId=managed?rowText(row,8):undefined,identity=digest([sheet.sheet_id,normalized(name),normalized(titleValue),normalized(detail),managed?rowText(row,9):""]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
    const key=`td:hours:${file}:${sheet.sheet_id}:${identity}:${occurrence}`;
-   records.push({id:key,memberId,name,title:titleValue,matterTitle:managed?rowText(row,10):sheet.sheet_name,date,hours,workHours,entered:/^已录入|^已錄入/.test(rowText(row,6)),detail,sourceRefs:[key],localTaskId:localTaskId||undefined});
+   records.push({id:key,memberId,name,title:titleValue,matterTitle:managed?rowText(row,10):sheet.sheet_name,date,hours,workHours,entered:/^已录入|^已錄入/.test(rowText(row,6)),detail,sourceRefs:[key],localTaskId:localTaskId||undefined,localVersion:managed?rowText(row,12):undefined});
    if(!memberId)issues.push(`「${name}」未能對應本部門唯一成員，其 ${hours??"待確認"} 小時保留於同步明細，暫不計入成員總計。`);
    if(hours===null&&!managed)issues.push(`${name} · ${titleValue}：來源沒有可確認的時長，暫不計入。`);
   }

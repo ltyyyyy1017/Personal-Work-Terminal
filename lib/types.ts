@@ -342,7 +342,7 @@ export interface ResourceView extends WorkResource {
 
 export interface SyncedVolunteer {
  id:string;memberId?:string;name:string;title:string;matterTitle:string;date:string;
- hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;
+ hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;localVersion?:string;
 }
 export interface TeamSheetState {
  enabled:boolean;department:string;taskFileId:string;hoursFileId:string;academicYear:number;enabledAt:string;

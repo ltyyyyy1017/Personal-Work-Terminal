@@ -5,7 +5,7 @@ import {atomicWrite} from "./atomic-file";
 import {assert,AppError} from "./errors";
 import {tencentClient,tencentConnected,type SheetCell,type SheetInfo} from "./tencent-docs";
 import {parseAssignments,parseVolunteer,digest,sheetRows,cellValue,normalized,taskSyncPayload,type SheetSnapshot} from "./team-sheet-data";
-import type {TeamSheetState,Task,Store} from "./types";
+import type {TeamSheetState,Task,Store,SyncedVolunteer} from "./types";
 
 const taskHeader=["序號","時間","任務","姓名","聯繫方式","完成情況","事項","工作台編號","任務ID","成員ID","志願時錄入","同步校驗","更新時間"];
 const hoursHeader=["序號","姓名","任務","線上出工時長","線下出工時長","匯總志願時長/h","錄入情況","日期","任務ID","工作台編號","事項","同步校驗","更新時間"];
@@ -27,9 +27,10 @@ export async function pullTeamSheets(client:Client,config:TeamSheetState){
   for(const a of assignments){
    let matter=s.matters.find(m=>m.department===config.department&&normalized(m.title)===normalized(a.matter));if(!matter){matter={id:newId("matter"),title:a.matter,department:config.department,note:"從團學任務分工表匯入",createdAt:stamp,updatedAt:stamp};s.matters.push(matter);}
    const existing=s.tasks.find(t=>t.sourceRefs?.includes(a.key));
+   if(existing?.sourceMissing){existing.sourceMissing=false;existing.updatedAt=stamp;}
    const item:Task={id:existing?.id||`td_task_${digest(a.key)}`,title:a.title,department:config.department,matterId:matter.id,memberIds:a.memberIds,assignee:a.names.join("、"),due:a.date||undefined,workDate:a.date,status:a.done?"done":"doing",reviewRequired:!a.done,priority:"normal",note:`來源：團學任務分工 · ${a.matter}\n${a.phase?`時間／階段：${a.phase}\n`:""}執行人：${a.names.join("、")}\n來源記錄由線上表格同步；志願時以匯總表為準。`,sourceRefs:[a.key,...a.refs],sourceMissing:false,createdAt:existing?.createdAt||stamp,updatedAt:existing?.updatedAt||stamp};
-   const content=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||content(existing)===last.local;
-   if(existing){const currentHash=content(existing);if(last&&currentHash!==last.local){if(nextHash!==last.source)conflicts.push(`${a.matter} · ${a.title}：本機及來源均有修改，已保留本機版本，請核對。`);}else if(currentHash!==nextHash)Object.assign(existing,item,{updatedAt:stamp});}
+   const content=(t:Task)=>{const {updatedAt,createdAt,organization,sourceMissing,...rest}=t;return digest(rest);},legacy=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||[content(existing),legacy(existing),legacy({...existing,organization:undefined})].includes(last.local);
+   if(existing){const currentHash=content(existing);if(!canUpdate){if(![nextHash,legacy(item)].includes(last.source))conflicts.push(`${a.matter} · ${a.title}：本機及來源均有修改，已保留本機版本，請核對。`);}else if(currentHash!==nextHash)Object.assign(existing,item,{updatedAt:stamp});}
    else{s.tasks.push(item);added++;}
    if(canUpdate)s.teamSheets.importHashes[item.id]={local:content(existing||item),source:nextHash};
   }
@@ -70,22 +71,25 @@ export async function pushTeamSheets(client:Client,config:TeamSheetState){
   }
   const values:SheetCell[]=[],expected=new Map<string,(string|number)[]>();
   for(const [key,old]of existing){const taskId=String(old.values[8]||"");if(!affected.has(taskId))continue;
-   if(snapshot.cells.some(c=>c.row===old.row&&c.formula)||digest(old.values.slice(0,11))!==old.values[11])throw new AppError("同步分表有人工改動，已保留原值並停止覆寫；請先核對工作台與來源時長",409);
+   const agreed=desired.get(key);const sameValues=agreed&&JSON.stringify(old.values.slice(0,11))===JSON.stringify(agreed.slice(0,11));
+   if(snapshot.cells.some(c=>c.row===old.row&&c.formula)||digest(old.values.slice(0,11))!==old.values[11]&&!sameValues)throw new AppError("同步分表有人工改動，已保留原值並停止覆寫；請核對後把工作台資料改為相同內容，再重新同步",409);
    if(!desired.has(key)){for(let i=0;i<13;i++)values.push(valueCell(old.row,i,""));expected.set(key,[]);}
   }
   for(const [key,want]of desired){const old=existing.get(key);if(old&&JSON.stringify(old.values)===JSON.stringify(want))continue;const row=old?.row??nextRow++;assert(row<target.sheet.row_count,"同步分表的空間不足，請增加行數後重試");for(let i=0;i<13;i++)values.push(valueCell(row,i,want[i]));expected.set(key,want);}
   writes.push({file:target.file,sheet:target.sheet,values,expected,keyCol});
  }
+ let verifiedHours:SyncedVolunteer[]|undefined;
  for(const target of writes){if(!target.values.length)continue;const current=readStore().teamSheets;assert(current?.enabled&&current.taskFileId===config.taskFileId&&current.hoursFileId===config.hoursFileId,"同步設定已改動，已停止寫入",409);for(let offset=0;offset<target.values.length;offset+=390)await client.write(target.file,target.sheet.sheet_id,target.values.slice(offset,offset+390));
-  const after=sheetRows((await readSheet(client,target.file,target.sheet)).cells),keys=new Map<string,(string|number)[]>();for(const cells of after.values()){const key=String(cells.get(target.keyCol)||"");if(key)keys.set(key,Array.from({length:13},(_,i)=>cells.get(i) as string|number??""));}
+  const verified=await readSheet(client,target.file,target.sheet),after=sheetRows(verified.cells),keys=new Map<string,(string|number)[]>();for(const cells of after.values()){const key=String(cells.get(target.keyCol)||"");if(key){assert(!keys.has(key),"核對時發現重複同步編號，請檢查分表",409);keys.set(key,Array.from({length:13},(_,i)=>cells.get(i) as string|number??""));}}
   for(const [key,want]of target.expected)assert(want.length?JSON.stringify(keys.get(key))===JSON.stringify(want):!keys.has(key),"寫入後核對未通過，已保留待同步狀態；重試會按編號更新，不會重複新增",502);
+  if(target.keyCol===9)verifiedHours=parseVolunteer([verified],config.hoursFileId,config.department,before.members,config.academicYear,[],target.sheet.sheet_id).records;
  }
- await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");for(const t of changed)s.teamSheets.taskHashes[t.id]=taskHash(before,t);for(const id of removed)delete s.teamSheets.taskHashes[id];s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;});
+ await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");for(const t of changed)s.teamSheets.taskHashes[t.id]=taskHash(before,t);for(const id of removed)delete s.teamSheets.taskHashes[id];if(verifiedHours)s.teamSheets.volunteers=[...s.teamSheets.volunteers.filter(r=>!r.localTaskId),...verifiedHours];s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;});
 }
 export async function runTeamSheetSync(mode:"all"|"pull"|"push"="all"){
  while(job.running)try{await job.running;}catch{/* A later request can retry a failed run. */}
  const config=readStore().teamSheets;assert(config?.enabled,"請先設定並啟用團學表格同步");assert(tencentConnected(),"請先授權騰訊文檔");
- job.running=(async()=>{try{const client=await tencentClient();if(mode!=="pull")await pushTeamSheets(client,config);if(mode!=="push")await pullTeamSheets(client,readStore().teamSheets!);}catch(e){await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastError=e instanceof AppError?e.message:"同步未完成，請稍後重試";s.teamSheets.lastErrorAt=nowISO();}});throw e;}})();
+ job.running=(async()=>{try{const client=await tencentClient();let pushError:unknown;if(mode!=="pull")try{await pushTeamSheets(client,config);}catch(e){if(mode==="push")throw e;pushError=e;}if(mode!=="push")await pullTeamSheets(client,readStore().teamSheets!);if(pushError)throw pushError;}catch(e){await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastError=e instanceof AppError?e.message:"同步未完成，請稍後重試";s.teamSheets.lastErrorAt=nowISO();}});throw e;}})();
  try{await job.running;}finally{job.running=undefined;}
 }
 export function scheduleTeamSheetPush(){if(job.timer)clearTimeout(job.timer);job.timer=setTimeout(()=>{job.timer=undefined;if(readStore().teamSheets?.enabled&&!job.running&&pendingTeamTasks())void runTeamSheetSync("push").catch(()=>{});},3000);job.timer.unref?.();}

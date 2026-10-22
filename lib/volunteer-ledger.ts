@@ -17,7 +17,7 @@ export function volunteerLedger(tasks:Task[],records:WorkLog[],month="",imported
   for(const id of t.memberIds||[])if(Number.isFinite(t.volunteerHours?.[id]))candidates.push({id:`task:${t.id}:${id}`,memberId:id,title:t.title,date,hours:t.volunteerHours![id],entered:t.volunteerEntered===true,sources:[{kind:"task",id:t.id}],refs:t.sourceRefs||[],taskId:t.id});
  }
  for(const w of records)if(w.status==="done"&&w.volunteerConfirmed)for(const id of w.memberIds)if(Number.isFinite(w.volunteerHours?.[id]))candidates.push({id:`worklog:${w.id}:${id}`,memberId:id,title:w.title,date:w.date,hours:w.volunteerHours![id],entered:w.volunteerEntered===true,sources:[{kind:"worklog",id:w.id}],refs:w.sourceRefs||[],taskId:w.taskId});
- for(const r of imported)if(r.memberId&&r.hours!==null&&Number.isFinite(r.hours))candidates.push({id:r.id,memberId:r.memberId,title:r.title,date:r.date,hours:r.hours,entered:r.entered,sources:[{kind:"sheet",id:r.id}],refs:r.sourceRefs,taskId:r.localTaskId});
+ for(const r of imported)if(r.memberId&&r.hours!==null&&Number.isFinite(r.hours)){if(r.localTaskId){const task=tasks.find(t=>t.id===r.localTaskId);if(!task||r.localVersion!==task.updatedAt)continue;}candidates.push({id:r.id,memberId:r.memberId,title:r.title,date:r.date,hours:r.hours,entered:r.entered,sources:[{kind:"sheet",id:r.id}],refs:r.sourceRefs,taskId:r.localTaskId});}
  // Union only explicit links or a single exact task/work-log pair. Repeated
  // tasks with the same title and date remain separate unless explicitly linked.
  const parent=candidates.map((_,i)=>i),find=(i:number):number=>parent[i]===i?i:(parent[i]=find(parent[i]));
