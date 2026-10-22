@@ -123,6 +123,7 @@ export interface CalEvent {
 }
 
 export interface Task {
+  sourceRecorded?: boolean;
   sheetDestination?: {taskSheetId:string;hoursSheetId:string;hoursKind:"online"|"offline"};
   sheetOrigin?: {task?:{sheetId:string;row:number;rows?:Record<string,number>};hours?:{sheetId:string;row:number}};
   sourceHours?: Record<string,number>;
