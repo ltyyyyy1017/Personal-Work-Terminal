@@ -2,7 +2,7 @@
   "name": "personal-workbench",
   "version": "1.0.0",
   "private": true,
-  "description": "可自行部署的个人工作台：事务、日历、成员、报销与服务连接",
+  "description": "可自行部署的单用户工作台：事务、个人日程、成员、发票报销与腾讯文档、金山文档、iCloud 服务连接",
   "scripts": {
     "dev": "next dev -p 3939 -H 127.0.0.1",
     "build": "next build",
@@ -47,5 +47,6 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3"
-  }
+  },
+  "packageManager": "pnpm@11.25.0"
 }
