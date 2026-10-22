@@ -58,6 +58,9 @@ function taskHash(s:Store,t:Task){return digest(taskSyncPayload(t,s.members,s.ma
 export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>c.taskHashes[t.id]!==taskHash(s,t)).length+Object.keys(c.taskHashes).filter(id=>!tasks.some(t=>t.id===id)).length;}
 export async function pushTeamSheets(client:Client,config:TeamSheetState){
  const before=readStore(),tasks=eligibleTasks(before),changed=tasks.filter(t=>config.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(config.taskHashes).filter(id=>!tasks.some(t=>t.id===id));
+ // Track a first publication before sending it. If the second document fails
+ // and the task is then deleted, its partially published rows still get cleared.
+ if(changed.length)await mutateStore(s=>{assert(s.teamSheets?.enabled&&s.teamSheets.taskFileId===config.taskFileId&&s.teamSheets.hoursFileId===config.hoursFileId,"同步設定已改動",409);for(const t of changed)s.teamSheets.taskHashes[t.id]??="";});
  const taskTarget=await managedSheet(client,config,"task"),hoursTarget=await managedSheet(client,config,"hours");if(!changed.length&&!removed.length)return;const affected=new Set([...changed.map(t=>t.id),...removed]);
  const writes:{file:string;sheet:SheetInfo;values:SheetCell[];expected:Map<string,(string|number)[]>;keyCol:number}[]=[];
  for(const [kind,target]of [["task",taskTarget],["hours",hoursTarget]]as const){
