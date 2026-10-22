@@ -123,6 +123,8 @@ export interface CalEvent {
 }
 
 export interface Task {
+  kdocsReporting?: {include:boolean;sheetId?:number;projectId?:string};
+  kdocsOrigin?: {sheetId:number;row:number;recordId?:string;fingerprint?:string;projectId?:string};
   sourceRecorded?: boolean;
   sheetDestination?: {taskSheetId:string;hoursSheetId:string;hoursKind:"online"|"offline"};
   sheetOrigin?: {task?:{sheetId:string;row:number;rows?:Record<string,number>};hours?:{sheetId:string;row:number}};
@@ -268,6 +270,7 @@ export interface LogEntry {
 }
 
 export interface Store {
+  kdocs?: KdocsState;
   teamSheets?: TeamSheetState;
   performance: PerformanceEntry[];
   matters: Matter[];
@@ -330,7 +333,7 @@ export interface WorkLog {
   createdAt: string;
   updatedAt: string;
 }
-export interface PerformanceEntry {id:string;memberId:string;date:string;title:string;activity:string;category:"fixed"|"free";rule:string;phase?:"pre"|"post";status:"done"|"leave"|"no-score";note:string;createdAt:string}
+export interface PerformanceEntry {id:string;memberId:string;date:string;title:string;activity:string;category:"fixed"|"free";rule:string;phase?:"pre"|"post";status:"done"|"leave"|"no-score";note:string;createdAt:string;sourceRef?:string;sourceMissing?:boolean}
 
 export interface WorkResource {
   organization?: Organization;
@@ -361,4 +364,17 @@ export interface NativeSheetLink {
  file:string;sheet:string;kind:"task"|"hours";memberId:string;row:number;owned:boolean;
  before:{col:number;value:string|number}[];after:{col:number;value:string|number}[];
  previous?:{col:number;value:string|number}[];
+}
+export interface KdocsMapping {
+ sheetId:number;headerRow:number;titleColumn:number;memberColumn:number;dateColumn?:number;activityColumn?:number;noteColumn?:number;statusColumn?:number;ruleColumn?:number;detailColumn?:number;scoreColumn?:number;categoryColumn?:number;rule?:string;phase?:"pre"|"post";
+}
+export interface KdocsState {
+  projects?:{sheetId:number;id:string;title:string}[];
+  sourceRecords?:{key:string;title:string;names:string[];date:string;score?:number;category?:string;status:string}[];
+  suppressedRefs?:string[];
+ enabled:boolean;url:string;department:string;year:number;lastPullAt?:string;lastPushAt?:string;lastError?:string;lastErrorAt?:string;
+ mappings:KdocsMapping[];sheets:{id:number;name:string;columns:{col:number;label:string}[];sample:string[][]}[];
+ importedCount:number;performanceCount:number;issues:string[];importHashes:Record<string,string>;
+ publications:Record<string,{sheetId:number;memberId:string;row:number;owned:boolean;recordId?:string;priorRecordIds?:string[];attempted?:boolean;before:{col:number;value:string}[];after:{col:number;value:string}[];previous?:{col:number;value:string}[];accepted?:{col:number;value:string}[][]}[]>;
+ taskHashes:Record<string,string>;
 }
