@@ -10,6 +10,7 @@ import type { Task } from "@/lib/types";
 import * as core from "@/lib/server/handlers/core";
 import * as calendar from "@/lib/server/handlers/calendar";
 import * as reimburse from "@/lib/server/handlers/reimburse";
+import {bulk as reimbursementBulk} from "@/lib/server/handlers/reimbursement-bulk";
 import { exportMatter } from "@/lib/server/handlers/matter-reimbursements";
 import * as docs from "@/lib/server/handlers/docs";
 import * as workspace from "@/lib/server/handlers/workspace";
@@ -21,6 +22,7 @@ import * as projects from "@/lib/server/handlers/projects";
 import * as icloud from "@/lib/server/handlers/icloud";
 import * as structure from "@/lib/server/handlers/structure";
 import * as records from "@/lib/server/handlers/records";
+import * as teamSheets from "@/lib/server/handlers/team-sheets";
 import * as account from "@/lib/server/handlers/account";
 import * as passkeys from "@/lib/server/handlers/passkeys";
 import { boundedBody, limitSource } from "@/lib/server/security";
@@ -65,9 +67,14 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
     if (key === "auth/passkeys/remove" && method === "POST") return await passkeys.remove(ctx);
     if (key === "state" && method === "GET") {
       const s = readStore();
-      return json({matters:s.matters,tasks:s.tasks,members:s.members,workLogs:s.workLogs,resources:workspace.resourceViews(),events:s.events,activities:s.activities,docs:s.docs,settings:s.settings,log:s.log.slice(0,8),system:{...storageInfo(),authRequired:authRequired()},demo:s.tasks.some(t=>t.demo)||s.events.some(e=>e.demo)});
+      return json({teamSheets:s.teamSheets,matters:s.matters,tasks:s.tasks.filter(t=>!t.sourceMissing),members:s.members,workLogs:s.workLogs,resources:workspace.resourceViews(),events:s.events,activities:s.activities,docs:s.docs,settings:s.settings,log:s.log.slice(0,8),system:{...storageInfo(),authRequired:authRequired()},demo:s.tasks.some(t=>t.demo)||s.events.some(e=>e.demo)});
     }
     if(key==="workspace/departments"&&method==="GET")return structure.departments();
+    if(key==="team-sheets"&&method==="GET")return teamSheets.status();
+    if(key==="team-sheets/connect"&&method==="POST")return await teamSheets.begin();
+    if(key==="team-sheets/authorize"&&method==="POST")return await teamSheets.authorize(ctx);
+    if(key==="team-sheets/config"&&method==="POST")return await teamSheets.configure(ctx);
+    if(key==="team-sheets/sync"&&method==="POST"){limitSource(req,"team-sheet-sync",12,3600_000);return await teamSheets.sync();}
     if(key==="workspace/departments"&&method==="POST"){ctx.params.id="";return await structure.saveDepartment(ctx);}
     if(path[0]==="workspace"&&path[1]==="departments"&&path.length===3&&method==="PATCH"){ctx.params.id=path[2];return await structure.saveDepartment(ctx);}
     if(key==="matters"&&method==="POST"){ctx.params.id="";return await structure.saveMatter(ctx);}
@@ -110,6 +117,7 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
     if(path[0]==="equipment"&&path[1]==="devices"&&path.length===3&&method==="PATCH"){ctx.params.id=path[2];return await equipment.patchDevice(ctx);}
     if(path[0]==="equipment"&&path[1]==="status"&&path.length===3&&method==="PATCH"){ctx.params.id=path[2];return await equipment.operationalStatus(ctx);}
     if(key==="reimbursement/preview"&&method==="POST")return await intake.preview(ctx);
+    if(key==="reimbursements/bulk"&&method==="POST")return await reimbursementBulk(ctx);
     if (key === "settings" && method === "PATCH") return await core.patchSettings(ctx);
     if (key === "backup" && method === "GET") return await core.backup();
     if (key === "demo" && method === "POST") {

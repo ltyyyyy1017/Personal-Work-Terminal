@@ -123,6 +123,9 @@ export interface CalEvent {
 }
 
 export interface Task {
+  workDate?: string;
+  sourceMissing?: boolean;
+  sourceRefs?: string[];
   approvedAt?: string;
   volunteerHours?: Record<string,number>;
   volunteerEntered?: boolean;
@@ -259,6 +262,7 @@ export interface LogEntry {
 }
 
 export interface Store {
+  teamSheets?: TeamSheetState;
   performance: PerformanceEntry[];
   matters: Matter[];
   icloud?: {account:string;calendars:{id:string;url:string;name:string;color?:string}[];lastReadAt?:string;lastWriteAt?:string};
@@ -301,6 +305,8 @@ export interface Member {
 }
 
 export interface WorkLog {
+  taskId?: string;
+  sourceRefs?: string[];
   volunteerEntered?: boolean;
   volunteerHours?: Record<string,number>;
   volunteerConfirmed?: boolean;
@@ -332,4 +338,15 @@ export interface WorkResource {
 export interface ResourceView extends WorkResource {
   username?: string;
   hasCredential: boolean;
+}
+
+export interface SyncedVolunteer {
+ id:string;memberId?:string;name:string;title:string;matterTitle:string;date:string;
+ hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;
+}
+export interface TeamSheetState {
+ enabled:boolean;department:string;taskFileId:string;hoursFileId:string;academicYear:number;enabledAt:string;
+ taskSheetId?:string;hoursSheetId?:string;lastPullAt?:string;lastPushAt?:string;lastError?:string;lastErrorAt?:string;
+ importHashes?:Record<string,{local:string;source:string}>;
+ volunteers:SyncedVolunteer[];issues:string[];importedCount:number;taskHashes:Record<string,string>;
 }

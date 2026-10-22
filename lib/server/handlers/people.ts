@@ -58,8 +58,11 @@ export async function saveWorkLog(ctx:Ctx){
     assert(title,"请填写活动名称");assert(isDateLike(date),"请填写有效的出工日期");
     assert(/^([01]\d|2[0-3]):[0-5]\d$/.test(start)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(end)&&end>start,"结束时间须晚于开始时间（跨日请分两条记录）");
     const ids=memberIds(s,b.memberIds,"运营部");assert(ids.length>0,"请至少选择一位运营部成员");
+    const taskId="taskId" in b?str(b.taskId,"",100):old?.taskId;
+    if(taskId){const task=s.tasks.find(t=>t.id===taskId);assert(task&&task.department==="运营部"&&ids.every(id=>task.memberIds?.includes(id)),"關聯任務須屬於运营部，且包含本次所有出工成員");}
     const w:WorkLog={id:old?.id||newId("work"),title,date,start,end,location:str(b.location,"",120),duty:str(b.duty,"摄影",80),memberIds:ids,note:str(b.note,"",1000),status:b.status==="done"?"done":"planned",createdAt:old?.createdAt||nowISO(),updatedAt:nowISO()};
-    if(old){if(old.date!==w.date||old.start!==w.start||old.end!==w.end||old.status!==w.status||JSON.stringify(old.memberIds)!==JSON.stringify(w.memberIds)){old.volunteerConfirmed=false;old.volunteerEntered=false;}old.volunteerHours=Object.fromEntries(Object.entries(old.volunteerHours||{}).filter(([id])=>w.memberIds.includes(id)));Object.assign(old,w);}else s.workLogs.push(w);if("volunteerHours" in b)applyVolunteer(old||w,{hours:b.volunteerHours,confirmed:b.volunteerConfirmed,entered:b.volunteerEntered,evidence:b.volunteerEvidence});return old||w;
+    w.taskId=taskId||undefined;
+    if(old){if(old.date!==w.date||old.start!==w.start||old.end!==w.end||old.status!==w.status||old.taskId!==w.taskId||JSON.stringify(old.memberIds)!==JSON.stringify(w.memberIds)){old.volunteerConfirmed=false;old.volunteerEntered=false;}old.volunteerHours=Object.fromEntries(Object.entries(old.volunteerHours||{}).filter(([id])=>w.memberIds.includes(id)));Object.assign(old,w);}else s.workLogs.push(w);if("volunteerHours" in b)applyVolunteer(old||w,{hours:b.volunteerHours,confirmed:b.volunteerConfirmed,entered:b.volunteerEntered,evidence:b.volunteerEvidence});return old||w;
   });return json({workLog:result});
 }
 export async function deleteWorkLog(ctx:Ctx){await mutateStore(s=>{const i=s.workLogs.findIndex(w=>w.id===ctx.params.id);assert(i>=0,"出工记录不存在",404);s.workLogs.splice(i,1);});return json({ok:true});}

@@ -1,4 +1,5 @@
 import { mutateStore, newId, nowISO, readStore } from "../../store";
+import {scheduleTeamSheetPush} from "../../team-sheet-sync";
 import { bool, isDateLike, json, str } from "../http";
 import { AppError, assert } from "../../errors";
 import type { CalEvent, Store, Task } from "../../types";
@@ -158,7 +159,7 @@ export async function createTask(ctx: Ctx) {
     task.assignee=task.memberIds.map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
     s.tasks.push(task);
   });
-  return json({ task });
+  scheduleTeamSheetPush();return json({ task });
 }
 
 export async function patchTask(ctx: Ctx) {
@@ -180,6 +181,7 @@ export async function patchTask(ctx: Ctx) {
       task.department = body.department as Task["department"];
     }
     if ("due" in body) task.due = isDateLike(body.due) ? str(body.due) : undefined;
+    if("workDate" in body){assert(isDateLike(body.workDate)&&body.workDate.length===10,"請填寫有效的實際出工日期");task.workDate=body.workDate;}
     if ("note" in body) task.note = str(body.note, "", 500) || undefined;
     const previousMembers=JSON.stringify(task.memberIds||[]);
     task.memberIds=memberIds(s,"memberIds" in body?body.memberIds:task.memberIds||[],task.department);
@@ -204,7 +206,7 @@ export async function patchTask(ctx: Ctx) {
     task.updatedAt = nowISO();
     return task;
   });
-  return json({ task: result });
+  scheduleTeamSheetPush();return json({ task: result });
 }
 
 export async function deleteTask(ctx: Ctx) {
@@ -213,7 +215,7 @@ export async function deleteTask(ctx: Ctx) {
     if (idx < 0) throw new AppError("任务不存在", 404);
     s.tasks.splice(idx, 1);
   });
-  return json({ ok: true });
+  scheduleTeamSheetPush();return json({ ok: true });
 }
 
 export { TAGS };
