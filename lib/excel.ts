@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import {addIncomeExpenseSheet} from "./income-expense-excel";
 import {traditionalWorkbook} from "./export-traditional";
 import type { NamingPlanRow } from "./naming";
 import { rmbUpper } from "./naming";
@@ -60,6 +61,7 @@ export async function buildReimburseWorkbook(opts: {
   const wb = new ExcelJS.Workbook();
   wb.creator = "个人工作台";
   wb.created = new Date();
+  addIncomeExpenseSheet(wb,{department:activity.department,title:opts.matterTitle||activity.name,activities:[activity],settings});
 
   /* ------------------------------- 报销明细 ------------------------------- */
   const ws = wb.addWorksheet("报销明细", {

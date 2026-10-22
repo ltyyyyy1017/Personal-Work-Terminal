@@ -16,6 +16,7 @@ import { errorResponse, json, str } from "../http";
 import { AppError, assert } from "../../errors";
 import { authRequired, generateToken } from "../../auth";
 import { getGithubToken } from "../../github";
+import {departmentProfiles} from "../../organizations";
 import type { Settings, Store } from "../../types";
 import type { Ctx } from "../ctx";
 import type { NextResponse } from "next/server";
@@ -89,6 +90,17 @@ function mergeSettings(current: Settings, body: Record<string, unknown>): Settin
     target.project = pickString(r.project, target.project, 80);
     if (typeof r.mergeAll === "boolean") target.mergeAll = r.mergeAll;
     if (typeof r.autoClassify === "boolean") target.autoClassify = r.autoClassify;
+    if (r.exportFormats!==undefined) {
+      assert(r.exportFormats&&typeof r.exportFormats==="object"&&!Array.isArray(r.exportFormats),"匯出格式設定不正確");
+      const entries=Object.entries(r.exportFormats);assert(entries.length<=50,"部門匯出格式最多 50 組");
+      target.exportFormats??={};
+      for(const [department,raw]of entries){
+        assert(departmentProfiles(next).some(p=>p.id===department),"匯出格式須屬於已設定的部門");
+        assert(raw&&typeof raw==="object"&&!Array.isArray(raw),"匯出格式設定不正確");
+        const v=raw as Record<string,unknown>;assert(v.format==="standard"||v.format==="income-expense","請選擇有效的匯出格式");
+        target.exportFormats[department]={format:v.format,title:pickString(v.title,"",160).trim()};
+      }
+    }
   }
 
   if (body.calendar && typeof body.calendar === "object") {
