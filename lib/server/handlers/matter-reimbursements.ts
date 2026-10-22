@@ -65,7 +65,7 @@ export async function exportMatter(ctx: Ctx) {
         const localItem=material.kind==="合并件"?0:itemIndex>=0?itemIndex:activity.items.length;
         const materialIndex=(materialCounts.get(localItem)||0)+1;materialCounts.set(localItem,materialIndex);
         const item=activity.items[localItem];
-        const name=materialFileName({seq:`${offset+localItem+1}-${materialIndex}`,item:material.kind==="合并件"?activity.name:item?.name||"未归类",amount:material.kind==="合并件"?output.totalAmount:item?.amount??null,kind:material.kind,extension:relative.toLowerCase().endsWith(".txt")?".txt":".pdf"});
+        const name=materialFileName({seq:`${offset+localItem+1}-${materialIndex}`,item:material.kind==="合并件"?activity.name:item?.name||"未归类",amount:material.kind==="合并件"?output.totalAmount:item?.amount??null,kind:material.kind,extension:path.extname(relative).toLowerCase()});
         folder.file(name,bytes);
         const source=material?.originalName||(material?.kind==="合并件"?"由报销材料生成":"");
         materials.push({claimant,activity:activity.name,kind:material?.kind||"其他",path:`${prefix}/${name}`,originalName:source});

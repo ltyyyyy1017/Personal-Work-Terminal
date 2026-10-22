@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import {supportedMaterial,textMaterial,MATERIAL_FORMAT_LABEL} from "../../reimbursement-formats";
 import {decodePlainText} from "../../plain-text";
 import {readMaterial} from "../../material-reader";
 import {summarizeRecognition, type RecognizedDocument} from "../../reimbursement-recognition";
+import {validExpenseDate} from "../../expense-date";
 import path from "node:path";
 import { mutateStore, newId, nowISO, readStore, dirs, appendLog } from "../../store";
 import { json, numOrNull, str } from "../http";
@@ -86,6 +88,15 @@ export async function getActivity(ctx: Ctx) {
   });
 }
 
+/** Read a saved attachment without modifying the record. Results are reviewed before applying. */
+export async function recognizeFile(ctx:Ctx){
+  const body=await ctx.body() as Record<string,unknown>,a=findActivity(readStore(),ctx.params.id);
+  const file=a.files.find(f=>f.id===body.fileId);assert(file,"材料不存在");
+  assert(file.size<=15*1024*1024,"此材料超過 15 MB，請拆分後識別");
+  const result=await readMaterial(readReimburseFile(file.storedName),file.originalName,file.id);
+  return json({result});
+}
+
 export async function createActivity(ctx: Ctx) {
   const body = (await ctx.body()) as Record<string, unknown>;
   const name = str(body.name).trim();
@@ -96,9 +107,7 @@ export async function createActivity(ctx: Ctx) {
   const department = departmentProfiles(readStore().settings).some(p=>p.id===body.department)
     ? (body.department as ReimbActivity["department"])
     : "行政部";
-  const date = /^\d{4}-\d{2}-\d{2}/.test(String(body.date ?? ""))
-    ? String(body.date).slice(0, 10)
-    : todayStr();
+  const date = validExpenseDate(String(body.date??"")) || "";
   const submitter = str(body.submitter).trim();
   const reason = str(body.reason).trim();
   const amount = numOrNull(body.amount);
@@ -148,6 +157,7 @@ export async function patchActivity(ctx: Ctx) {
     if ("submitter" in body) a.submitter = str(body.submitter).trim();
     if ("reason" in body) a.reason = str(body.reason).trim();
     if ("note" in body) a.note = str(body.note).trim() || undefined;
+    if ("paidAmount" in body) {const paid=numOrNull(body.paidAmount);assert(paid!==null&&paid>0&&paid<100_000_000,"請填寫有效的原幣實付金額");a.paidAmount=paid;}
     a.organization=organizationFor(a.department,s.settings);
     if (["draft", "packaged", "submitted", "done"].includes(String(body.status))) {
       a.status = body.status as ReimbActivity["status"];
@@ -273,9 +283,9 @@ export async function uploadFiles(ctx: Ctx) {
     if (file.size === 0) continue;
     const id = newId("file");
     const ext = extOf(file.name);
-    assert([".pdf",".jpg",".jpeg",".png",".webp",".txt"].includes(ext), "报销材料支持 PDF、JPG、PNG、WebP 和 TXT");
+    assert(supportedMaterial(file.name), MATERIAL_FORMAT_LABEL);
     const buf = Buffer.from(await file.arrayBuffer());
-    if(ext===".txt") decodePlainText(buf);
+    if(textMaterial(file.name)) decodePlainText(buf);
     const mime = mimeOf(file.name);
     const saved = saveReimburseFile(activity.id, id, ext, buf);
     let text = "";
@@ -293,7 +303,8 @@ export async function uploadFiles(ctx: Ctx) {
       recognized.push(doc);
       if (doc.method !== "unreadable") { meta = doc.meta; text = doc.textPreview; pages = doc.pages ?? pages; }
     }
-    const autoKind = suggestKind(file.name, text);
+    const doc=recognized.find(d=>d.id===id);
+    const autoKind = doc&&doc.method!=="unreadable"?doc.kind:suggestKind(file.name, text);
     const kind = (MAT_KINDS as readonly string[]).includes(kindOverride)
       ? (kindOverride as MatKind)
       : store.settings.reimbursement.autoClassify
@@ -320,7 +331,7 @@ export async function uploadFiles(ctx: Ctx) {
     a.files.push(...added);
     const summary = summarizeRecognition(recognized), fields = summary.fields;
     // Supplemental material fills gaps only; existing edits and confirmed identities win.
-    for (const [target, source] of [["submitter", "name"], ["handler", "handler"], ["contact", "contact"], ["bankName", "bankName"], ["bankAccount", "bankAccount"]] as const) {
+    for (const [target, source] of [["submitter", "name"], ["handler", "handler"], ["contact", "contact"]] as const) {
       if (!a[target]?.trim() && fields[source]) a[target] = fields[source]!.value;
     }
     if (summary.taxi) {

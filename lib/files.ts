@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { dirs } from "./store";
 import { AppError } from "./errors";
+import {MATERIAL_EXTENSIONS} from "./reimbursement-formats";
 
 export const MAX_UPLOAD_BYTES = 60 * 1024 * 1024;
 
@@ -12,6 +13,8 @@ const MIME_BY_EXT: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  ".bmp":"image/bmp", ".tif":"image/tiff", ".tiff":"image/tiff", ".avif":"image/avif", ".heic":"image/heic", ".heif":"image/heif",
+  ".ofd":"application/ofd", ".xml":"application/xml", ".csv":"text/csv", ".json":"application/json", ".md":"text/markdown",
   ".txt": "text/plain; charset=utf-8",
   ".doc": "application/msword",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -43,7 +46,7 @@ export function saveReimburseFile(
   ext: string,
   bytes: Uint8Array,
 ): { storedName: string; size: number } {
-  if(!/^[\w-]+$/.test(activityId)||!/^[\w-]+$/.test(fileId)||![".pdf",".jpg",".jpeg",".png",".webp",".txt"].includes(ext))throw new AppError("非法文件参数",400);
+  if(!/^[\w-]+$/.test(activityId)||!/^[\w-]+$/.test(fileId)||!MATERIAL_EXTENSIONS.includes(ext as typeof MATERIAL_EXTENSIONS[number]))throw new AppError("非法文件参数",400);
   const dir = resolveInside(dirs.reimburse, activityId);
   fs.mkdirSync(dir, { recursive: true });
   const storedName = `${activityId}/${fileId}${ext}`;

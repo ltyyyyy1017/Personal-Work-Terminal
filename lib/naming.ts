@@ -1,6 +1,7 @@
 import { DEFAULT_NAMING, KIND_ORDER } from "./constants";
 import type { ReimbActivity, ReimbFile, ReimbItem } from "./types";
 import {traditional} from "./export-traditional";
+import {exportExtension,MATERIAL_EXTENSIONS} from "./reimbursement-formats";
 
 /** 128 / 128.5 / 1280.05，去掉多余小数位 */
 export function formatAmount(n: number | null | undefined): string {
@@ -32,7 +33,7 @@ export function materialFileName(opts: {
   amount: number | null;
   kind: string;
   template?: string;
-  extension?: ".pdf" | ".txt";
+  extension?: string;
 }): string {
   const template = opts.template || DEFAULT_NAMING;
   const base = template
@@ -43,7 +44,8 @@ export function materialFileName(opts: {
     .replace(/\{date\}/g, "");
   const safeBase = shortFileBase(traditional(base), 180);
   const label = opts.kind === "同行人" && !safeBase.includes("同行人") ? `${safeBase}-同行人` : safeBase;
-  return `${label}${opts.extension || ".pdf"}`;
+  const extension=opts.extension||".pdf";if(!MATERIAL_EXTENSIONS.includes(extension as typeof MATERIAL_EXTENSIONS[number]))throw new Error("不支援的匯出格式");
+  return `${label}${extension}`;
 }
 
 export function shortFileBase(name: string, maxBytes: number): string {
@@ -110,7 +112,7 @@ export function namingPlan(
           amount: item.amount,
           kind: file.kind,
           template,
-          extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
+          extension: exportExtension(file.originalName),
         }),
       });
     });
@@ -131,7 +133,7 @@ export function namingPlan(
         amount: null,
         kind: file.kind,
         template,
-        extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
+        extension: exportExtension(file.originalName),
       }),
     });
   });

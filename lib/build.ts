@@ -9,6 +9,7 @@ import { namingPlan, reimbursementPackageBase, suggestKind } from "./naming";
 import { decodePlainText } from "./plain-text";
 import { readMaterial } from "./material-reader";
 import {traditional} from "./export-traditional";
+import {retainedMaterial} from "./reimbursement-formats";
 import { buildReimburseWorkbook } from "./excel";
 import { analyzeActivity, type CheckItem } from "./checks";
 import { AppError } from "./errors";
@@ -56,7 +57,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     let text = "";
     try { if (/\.txt$/i.test(file.originalName)) text = decodePlainText(readReimburseFile(file.storedName)); } catch { /* The normal packaging step reports missing files. */ }
     let companion = suggestKind(file.originalName, text) === "同行人";
-    if (!companion && !/\.txt$/i.test(file.originalName) && file.size <= 15 * 1024 * 1024) {
+    if (!companion && file.size <= 15 * 1024 * 1024) {
       try { companion = (await readMaterial(readReimburseFile(file.storedName), file.originalName, file.id)).kind === "同行人"; } catch { /* Keep unidentified material as other. */ }
     }
     if (companion) { file.kind = "同行人"; companionIds.add(file.id); }
@@ -80,8 +81,8 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     if (!file) continue;
     try {
       const buf = readReimburseFile(file.storedName);
-      const plainText = /\.txt$/i.test(file.originalName);
-      const { bytes } = plainText ? { bytes: Buffer.from(traditional(decodePlainText(buf)),"utf8") } : await normalizeToPdf(buf, file.mime, file.originalName);
+      const plainText = retainedMaterial(file.originalName);
+      const { bytes } = plainText ? { bytes: /\.(txt|md|csv)$/i.test(file.originalName)?Buffer.from(traditional(decodePlainText(buf)),"utf8"):buf } : await normalizeToPdf(buf, file.mime, file.originalName);
       const name = uniqueName(row.name, used);
       fs.writeFileSync(path.join(outDir, name), bytes);
       manifest.push({ name, size: bytes.byteLength, kind: file.kind, fileId:file.id, originalName:file.originalName });
@@ -121,7 +122,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     `${settings.org || "示例组织一"} · ${activity.name}`,
     `报销部门：${activity.department}    报销人：${activity.submitter || "待补充"}`,
     `经办人：${activity.handler || "未填写"}`,
-    "TXT 补充材料按原格式保留，不参与 PDF 合并。",
+    "Office、OFD、XML 及其他補充文件保留原格式；不參與 PDF 合併。",
     `报销日期：${fmtDateFull(activity.date)}`,
     `关联事务：${store.matters.find(m=>m.id===activity.matterId)?.title||"未关联"}`,
     `进度：${isReported(activity)?"已上报":"未上报"} · ${isFunded(activity)?"已批款":"未批款"}`,

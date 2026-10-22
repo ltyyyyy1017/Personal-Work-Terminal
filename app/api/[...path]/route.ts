@@ -143,6 +143,7 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
       if(path.length===2 && method==="GET") return await reimburse.getActivity(ctx);
       if(path.length===2 && method==="PATCH") return await reimburse.patchActivity(ctx);
       if(path.length===2 && method==="DELETE") return await reimburse.deleteActivity(ctx);
+      if(path[2]==="recognize" && path.length===3 && method==="POST")return await reimburse.recognizeFile(ctx);
       if(path[2]==="items" && path.length===3 && method==="POST") return await reimburse.addItem(ctx);
       if(path[2]==="items" && path.length===4 && method==="PATCH") return await reimburse.patchItem(ctx);
       if(path[2]==="items" && path.length===4 && method==="DELETE") return await reimburse.deleteItem(ctx);

@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import ts from "typescript";
 const folder = path.resolve("runtime/reimbursement-text-check"); await fs.mkdir(folder, { recursive: true });
-const modules = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "material-reader"];
+const modules = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "pdf-options", "expense-date", "rapid-ocr", "document-material", "material-reader"];
 for (const name of modules) {
   let source = await fs.readFile(`lib/${name}.ts`, "utf8");
   for (const dep of modules) source = source.replaceAll(`"./${dep}"`, `"./${dep}.mjs"`);

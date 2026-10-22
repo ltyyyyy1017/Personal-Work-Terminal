@@ -317,11 +317,7 @@ export async function buildReimburseWorkbook(opts: {
   borderRange(cover, r, 1, r, 4);
   r++;
 
-  const bank = activity.bankAccount
-    ? `${activity.bankName || ""} ${activity.bankAccount}`.trim()
-    : "";
   for (const [label, value] of [
-    ["收款账户", bank],
     ["发票抬头", settings.reimbursement.invoiceTitle],
     ["纳税人识别号", settings.reimbursement.taxId],
     ["备注", activity.note || ""],

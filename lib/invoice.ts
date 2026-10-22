@@ -8,7 +8,7 @@ function normalizeText(raw: string): string {
     .replace(/開票日期/g, "开票日期").replace(/價稅合計/g, "价税合计").replace(/號碼/g, "号码")
     .replace(/\u00a0/g, " ")
     .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
-    .replace(/：/g, ":")
+    .replace(/：/g, ":").replace(/:{2,}/g, ":")
     .replace(/[（]/g, "(")
     .replace(/[）]/g, ")")
     .replace(/[／]/g, "/")

@@ -1,13 +1,14 @@
 import type { InvoiceMeta, MatKind } from "./types";
 import { parseInvoiceText } from "./invoice";
+import {expenseDates,type ExpenseDateBasis} from "./expense-date";
 
-export type RecognitionField = "item" | "name" | "handler" | "bankName" | "bankAccount" | "contact" | "date" | "amount" | "rmbAmount" | "currency" | "buyer" | "taxId" | "invoiceNo" | "from" | "to" | "companions" | "note";
-export const recognitionLabels: Record<RecognitionField, string> = { item: "报销事项", name: "实际报销人", handler: "报销经办人", bankName: "报销人收款银行", bankAccount: "报销人收款账号", contact: "报销人联系方式", date: "费用日期", amount: "实付金额", rmbAmount: "人民币报销金额", currency: "币种", buyer: "发票购买方抬头", taxId: "购买方税号", invoiceNo: "发票号码", from: "出发地", to: "目的地", companions: "同行人", note: "用途 / 备注" };
+export type RecognitionField = "item" | "name" | "handler" | "contact" | "date" | "amount" | "rmbAmount" | "currency" | "buyer" | "taxId" | "invoiceNo" | "from" | "to" | "companions" | "note";
+export const recognitionLabels: Record<RecognitionField, string> = { item: "报销事项", name: "实际报销人", handler: "报销经办人", contact: "报销人联系方式", date: "费用日期", amount: "实付金额", rmbAmount: "人民币报销金额", currency: "币种", buyer: "发票购买方抬头", taxId: "购买方税号", invoiceNo: "发票号码", from: "出发地", to: "目的地", companions: "同行人", note: "用途 / 备注" };
 export interface RecognizedDocument {
   id: string; name: string; fingerprint: string; kind: MatKind; method: "pdf-text" | "plain-text" | "ocr" | "unreadable";
   fields: Partial<Record<RecognitionField, string>>; meta: InvoiceMeta; reference?: string;
   taxi: boolean; category?: string; confidence: number; pages?: number; textPreview: string; warnings: string[];
-  refund?: boolean;
+  refund?: boolean; dateBasis?:ExpenseDateBasis;dateCandidates?:string[];engine?:string;
 }
 export interface Suggestion { value: string; sources: string[] }
 export interface RecognitionSummary {
@@ -30,6 +31,10 @@ function routeFields(text: string): { from?: string; to?: string; multiple?: boo
   const start = new RegExp(`^(?:${startLabels})$`), end = new RegExp(`^(?:${endLabels})$`);
   const stop = `${startLabels}|${endLabels}|同行人(?:员|員)?|同行者|乘车人|乘車人|里程|金额|金額|车费|車費|车型|車型|备注|備註|序号|序號|上车时间|下车时间|城市|用车时间|出行时间`;
   function clean(value: string) { return value.replace(new RegExp(`(?:(?:[ \\t]+|[;；])(?:${stop})[ \\t]*[:：]?|(?:${stop})[ \\t]*[:：]).*$`), "").trim().slice(0, 160); }
+  // Explicit labels generated from table coordinates take precedence over raw table rows.
+  const explicit=(labels:string)=>[...new Set([...text.matchAll(new RegExp(`(?:^|[\\n\\t ;；])(?:${labels})[ \\t]*[:：][ \\t]*([^\\n]+)`,"g"))].map(m=>clean(m[1])).filter(Boolean))];
+  const origins=explicit(startLabels),destinations=explicit(endLabels);
+  if(origins.length&&destinations.length)return origins.length===1&&destinations.length===1?{from:origins[0],to:destinations[0]}:{multiple:true};
   // A table can place the two column headings on one line, then the trip rows below.
   for (let i = 0; i < rows.length - 1; i++) {
     let columns = rows[i].split(/\t+| {2,}|\s*[|｜]\s*/).filter(Boolean);
@@ -38,8 +43,8 @@ function routeFields(text: string): { from?: string; to?: string; multiple?: boo
     if (fromIndex < 0 || toIndex < 0) continue;
     const routes: { from: string; to: string }[] = [];
     for (let j = i + 1; j < rows.length; j++) {
-      const cells = rows[j].split(/\t+| {2,}|\s*[|｜]\s*/).filter(Boolean);
-      if (cells.length !== columns.length || /^(?:合计|总计|備註|备注)/.test(cells[0])) break;
+      const cells = rows[j].split(rows[i].includes("\t")?/\t+/:/ {2,}|\s*[|｜]\s*/).filter(Boolean);
+      if (cells.length < Math.max(fromIndex,toIndex)+1 || /^(?:合计|总计|備註|备注)/.test(cells[0])) break;
       const from = clean(cells[fromIndex]), to = clean(cells[toIndex]);
       if (from && to && !start.test(from) && !end.test(to)) routes.push({ from, to });
     }
@@ -54,6 +59,7 @@ function routeFields(text: string): { from?: string; to?: string; multiple?: boo
   const pairs: { key: "from" | "to"; labels: string }[] = [{ key: "from", labels: startLabels }, { key: "to", labels: endLabels }];
   for (const { key, labels } of pairs) {
     const values = [...text.matchAll(new RegExp(`(?:^|[\\n\\t ;；|｜])(?:${labels})[ \\t]*[:：]?[ \\t]*([^\\n]*)`, "g"))].flatMap(match => {
+      if(!match[0].includes(":")&&!match[0].includes("：")&&match[1].trim())return [];
       let value = clean(match[1]);
       if (!value) { const next = text.slice((match.index ?? 0) + match[0].length).replace(/^\n/, "").split("\n")[0]?.trim(); if (next && !new RegExp(`^(?:${stop})(?:[:：]|$)`).test(next)) value = clean(next); }
       return value && !new RegExp(`^(?:${stop})(?:[:：]|$)`).test(value) ? [value] : [];
@@ -68,9 +74,9 @@ function routeFields(text: string): { from?: string; to?: string; multiple?: boo
 function companionNames(text: string, fileName: string) {
   const match = /(?:^|\n)[ \t]*(?:同行人(?:员|員)?|同行者|同乘人(?:员|員)?|同行名单|同行名單)[ \t]*[:：]?[ \t]*([^\n]*)(?:\n|$)/.exec(text);
   if (!match) {
-    if (!/同行|同乘/.test(fileName)) return undefined;
-    const plain=text.split(/[、,，;；\n]+/).map(s=>s.trim().replace(/^(?:\d{1,2}[.)）、]|[-*•])[ \t]*/, "")).filter(Boolean);
-    return plain.length && plain.length<=50 && plain.every(s=>/^[\p{L}·・][\p{L}·・ .'-]{0,58}$/u.test(s)) ? [...new Set(plain)].join("、") : undefined;
+    const namedList=/同行|同乘/.test(fileName);
+    const plain=text.replace(/(?:第[一二三四五六七八九十\d]+程|去程|返程)[ \t]*[:：]/g,"").split(/[、,，;；\n]+|(?<=[\p{Script=Han}])[ \t]+(?=[\p{Script=Han}])/u).map(s=>s.trim().replace(/^(?:\d{1,2}[.)）、]|[-*•])[ \t]*/, "")).filter(s=>s&&!/(?:同行|同乘|乘[车車]).*(?:名[单單]|人[员員])|名[单單]$/.test(s));
+    return plain.length && plain.length<=50 && (namedList||plain.length>=2&&plain.every(s=>/^[\p{Script=Han}]{2,6}$/u.test(s))) && plain.every(s=>/^[\p{L}·・][\p{L}·・ .'-]{0,58}$/u.test(s)) ? [...new Set(plain)].join("、") : undefined;
   }
   const chunks = [match[1]];
   for (const line of text.slice((match.index ?? 0) + match[0].length).split("\n")) {
@@ -123,34 +129,34 @@ export function parseMaterialText(raw: string, file: { id: string; name: string;
     if (meta.invoiceNo) fields.invoiceNo = meta.invoiceNo;
     if (meta.amount) fields.amount = meta.amount.toFixed(2);
   }
+  const standaloneAmounts=[...new Set([...text.matchAll(/(?:^|\n)[ \t]*(?:[-−][¥￥]?|[¥￥])([\d,]+\.\d{1,2})[ \t]*(?=\n|$)|(?:^|\n)[ \t]*([\d,]+\.\d{1,2})[ \t]*(?:CNY|RMB|HKD|MOP|USD)[ \t]*(?=\t|\n|$)/gi)].map(m=>Number((m[1]||m[2]).replace(/,/g,""))).filter(n=>n>0&&n<100_000_000))];
   const paid = money(compact, /(?:实付(?:金额|款)?|实际支付|实际付款|支付金额|付款金额|已支付|實付(?:金額)?)[^\d]{0,10}([\d,]+(?:\.\d{1,2})?)/)
-    || (kind === "支付截图" ? money(compact, /(?:支付成功|付款成功|交易成功)[^\d]{0,20}(?:[¥￥]|HK\$|MOP|USD|CNY|RMB)?([\d,]+\.\d{2})/i) || money(text, /(?:^|\n)\s*[-−]?[¥￥]\s*([\d,]+\.\d{2})/) : undefined);
-  if (kind !== "发票") fields.amount = paid || money(compact, /(?:合计(?:金额)?|总计|总金额|费用合计|车费|票价|金額)[^\d]{0,10}([\d,]+\.\d{2})/);
-  const dateText = labeled(text, "支付时间|付款时间|交易时间|出行日期|行程日期|乘车日期|用车日期|日期", 40);
-  fields.date = (dateText && dateValue(dateText)) || meta.issuedAt || dateValue(text);
+    || (kind === "支付截图" ? money(compact, /(?:支付成功|付款成功|交易成功)[^\d]{0,20}(?:[¥￥]|HK\$|MOP|USD|CNY|RMB)?([\d,]+\.\d{2})/i) || (standaloneAmounts.length===1?standaloneAmounts[0].toFixed(2):undefined) : undefined);
+  if (kind !== "发票") fields.amount = paid || money(compact, /(?:合[计計](?:金[额額])?|[总總][计計]|[总總]金[额額]|[费費]用合[计計]|[车車][费費]|票[价價]|金額)[^\d]{0,10}([\d,]+\.\d{2})/);
+  const expense=expenseDates(text);
+  fields.date = expense.date;
   fields.currency = currencyValue(text);
   fields.rmbAmount = money(compact, /(?:折合人民币(?:金额)?|人民币结算金额|实际人民币支出|人民币实付金额)[^\d]{0,10}([\d,]+(?:\.\d{1,2})?)/);
   fields.name = identityField(text, "(?:实际)?报销人(?:姓名)?|申请人(?:姓名)?");
   fields.handler = identityField(text, "(?:报销)?经办人(?:姓名)?|报销负责人|代办人|代辦人");
-  fields.bankName = labeled(text, "报销人收款银行|报销人开户行|報銷人開戶行", 100);
-  fields.bankAccount = labeled(text, "报销人收款账号|报销人收款賬號|报销人收款帳號|报销人银行卡号", 100);
   fields.contact = labeled(text, "申请人手机(?:号)?|报销人联系方式|报销人手机(?:号)?", 50);
   const route = routeFields(text);
   fields.from = route.from; fields.to = route.to; fields.companions = companionNames(text, file.name);
   const materialKind: MatKind = fields.companions && (kind === "其他" || kind === "清单" && /同行|同乘/.test(file.name)) ? "同行人" : kind;
-  const taxi = /打车|出租车|网约车|滴滴|的士|客运服务|客運服務/.test(compact + file.name) || !!fields.companions || !!(route.from && route.to);
+  const taxi = /打车|出租车|网约车|滴滴|的士|客运服务|客運服務|高德地图|高德地圖/.test(compact + file.name) || !!fields.companions || !!(route.from && route.to);
   let subject = labeled(text, "商品说明|商品名称|项目名称|费用名称|交易说明|服务名称|報銷事項|报销事项", 100);
   if (subject && /^(?:规格|单位|数量|单价|金额|税率|税额|货物或)/.test(subject)) subject = undefined;
   const starItem = text.match(/[*＊][^*＊\n]{1,25}[*＊]\s*([^\n*＊]{2,65})/);
-  if (starItem) subject = starItem[1].split(/\s+\d|规格型号|税率|数量/)[0].trim();
-  if (!subject && taxi) subject = "打车费用";
+  if (starItem&&kind==="发票"&&!/(?:报销事项|報銷事項)\s*[:：]/.test(text)) subject = starItem[1].split(/\s+\d|规格型号|税率|数量|[¥￥]/)[0].trim();
+  if (taxi&&!/(?:报销事项|報銷事項)\s*[:：]/.test(text)) subject = "打车费用";
+  if(subject&&(/^(?:规格|单位|数量|单价|金额|税率|税额|名称|统一社会信用代码|纳税人识别号)/.test(subject)||/\d{15,20}/.test(subject)))subject=undefined;
   fields.item = subject?.replace(/^[*＊\s]+/, "").slice(0, 120);
   fields.note = labeled(text, "报销用途|用途|备注|備註", 160);
   const category = taxi ? "交通差旅" : /打印|印刷|复印|影印/.test(compact) ? "打印制作" : /餐饮|餐費|餐费|餐厅|餐廳/.test(compact) ? "餐饮接待" : /文具|办公用品|配件|物资/.test(compact) ? "物资采购" : "其他";
   for (const k of Object.keys(fields) as RecognitionField[]) if (!fields[k]) delete fields[k];
   const refund = /退款成功|退款完成|全额退款|红字发票|负数发票|已冲红|小写[^\d\n]{0,5}[-−]/.test(compact);
   if (refund) delete fields.amount;
-  return { ...file, kind: materialKind, fields, meta, reference: labeled(text, "交易单号|订单编号|订单号|商户单号|支付单号", 80)?.replace(/\s/g, ""), taxi, category,
+  return { ...file, kind: materialKind, fields, meta, dateBasis:expense.basis,dateCandidates:expense.candidates,reference: labeled(text, "交易单号|订单编号|订单号|商户单号|支付单号", 80)?.replace(/\s/g, ""), taxi, category,
     confidence: file.confidence ?? 1, textPreview: text.slice(0, 3000), refund, warnings: [...(refund ? ["检测到退款或红字票据，未将票面金额当作报销支出，请核对实际净支出。"] : []), ...(route.multiple ? ["行程单包含不同路线，未将第一程当作整份行程；请核对并填写本次报销的起终点。"] : []), ...(invoice && !fields.buyer ? ["无法明确区分发票购买方名称，请对照原件核对抬头；未使用销售方名称代填。"] : [])] };
 }
 
@@ -185,14 +191,17 @@ export function summarizeRecognition(input: RecognizedDocument[]): RecognitionSu
     else if (values.length > 1) conflicts.push({ field: key, options: values });
   }
   const invoices = docs.filter(d => d.kind === "发票"), payments = docs.filter(d => d.kind === "支付截图"), others = docs.filter(d => d.kind !== "发票" && d.kind !== "支付截图");
-  for (const k of ["buyer", "taxId", "name", "handler", "bankName", "bankAccount", "contact", "from", "to", "companions", "rmbAmount"] as RecognitionField[]) single(k, k === "buyer" || k === "taxId" ? invoices : docs);
+  for (const k of ["buyer", "taxId", "name", "handler", "contact", "from", "to", "companions", "rmbAmount"] as RecognitionField[]) single(k, k === "buyer" || k === "taxId" ? invoices : docs);
   const notes = groups("note"); if (notes.length) fields.note = { value: notes.map(n => n.value).join("\n"), sources: notes.flatMap(n => n.sources) };
   const numbers = groups("invoiceNo", invoices); if (numbers.length) fields.invoiceNo = { value: numbers.map(n => n.value).join("、"), sources: numbers.flatMap(n => n.sources) };
-  const subjects = groups("item", invoices).length ? groups("item", invoices) : groups("item", others).length ? groups("item", others) : groups("item", payments);
+  const explicitSubjects=docs.filter(d=>/(?:报销事项|報銷事項)\s*[:：]/.test(d.textPreview));
+  const subjects=explicitSubjects.length?groups("item",explicitSubjects):docs.some(d=>d.taxi)?[{value:"打车费用",sources:docs.filter(d=>d.taxi).map(d=>d.name)}]:groups("item",payments).length?groups("item",payments):groups("item",invoices).length?groups("item",invoices):groups("item",others);
   if (subjects.length) fields.item = { value: subjects.map(s => s.value).join("、").slice(0, 160), sources: [...new Set(subjects.flatMap(s => s.sources))] };
-  // Dates are expense dates: payment first, then travel, then invoice issue date. Never choose silently between multiple dates.
-  const dated = payments.some(d => d.fields.date) ? payments : others.some(d => d.fields.date) ? others : invoices;
-  single("date", dated);
+  // Prefer the travel date, then payment/explicit expense dates. Issue dates never fill this field.
+  const dated=docs.some(d=>d.dateBasis==="itinerary"&&d.dateCandidates?.length)?docs.filter(d=>d.dateBasis==="itinerary"):docs.some(d=>d.dateBasis==="payment"&&d.dateCandidates?.length)?docs.filter(d=>d.dateBasis==="payment"):docs.filter(d=>d.dateBasis==="explicit");
+  const dates=new Map<string,Suggestion>();for(const doc of dated)for(const value of doc.dateCandidates||[]){const old=dates.get(value);if(old)old.sources.push(doc.name);else dates.set(value,{value,sources:[doc.name]});}
+  if(dates.size===1)fields.date=[...dates.values()][0];else if(dates.size>1)conflicts.push({field:"date",options:[...dates.values()]});
+  if(!dates.size)warnings.push("未找到行程或支付日期，請補充實際費用日期；開票日期不會代填。");
   single("currency", docs);
   const validMoney = (list: RecognizedDocument[]) => list.length > 0 && list.every(d => Number(d.fields.amount) > 0) && groups("currency", list).length <= 1;
   const total = (list: RecognizedDocument[]) => list.reduce((sum, d) => sum + Math.round(Number(d.fields.amount) * 100), 0) / 100;

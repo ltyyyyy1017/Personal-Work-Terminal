@@ -6,7 +6,7 @@ import ts from "typescript";
 import { createCanvas, GlobalFonts } from "@napi-rs/canvas";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 const folder = path.resolve("runtime/recognition-check"); await fs.mkdir(folder, { recursive: true });
-const names = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "material-reader"];
+const names = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "pdf-options", "expense-date", "rapid-ocr", "document-material", "material-reader"];
 for (const name of names) {
   let source = await fs.readFile(`lib/${name}.ts`, "utf8");
   for (const dep of names) source = source.replaceAll(`"./${dep}"`, `"./${dep}.mjs"`);
@@ -16,14 +16,14 @@ const { parseMaterialText: parse, summarizeRecognition: summary } = await import
 const invoiceText = `电子发票(普通发票)\n发票号码:12345678901234567890\n开票日期:2026年10月20日\n购买方信息\n名称:广州测试文化中心\n统一社会信用代码:91110000TEST000001X\n销售方信息\n名称:广州测试印刷公司\n统一社会信用代码:91440101MA1234567X\n项目名称\n*印刷服务*活动海报\n价税合计(小写)￥127.50\n报销人:测试申请人`;
 const doc = (text, id, name = `${id}.pdf`) => parse(text, { id, name, fingerprint: `hash-${id}`, method: "pdf-text" });
 const inv = doc(invoiceText, "invoice");
-assert.equal(inv.kind, "发票"); assert.equal(inv.fields.amount, "127.50"); assert.equal(inv.fields.buyer, "广州测试文化中心"); assert.equal(inv.fields.item, "活动海报"); assert.equal(inv.fields.date, "2026-10-20");
+assert.equal(inv.kind, "发票"); assert.equal(inv.fields.amount, "127.50"); assert.equal(inv.fields.buyer, "广州测试文化中心"); assert.equal(inv.fields.item, "活动海报"); assert.equal(inv.fields.date, undefined);
 assert.equal(inv.fields.taxId, "91110000TEST000001X"); assert.equal(inv.fields.name, "测试申请人");
 const columns = doc(invoiceText.replace("购买方信息\n名称:广州测试文化中心\n统一社会信用代码:91110000TEST000001X\n销售方信息\n名称:广州测试印刷公司\n统一社会信用代码:91440101MA1234567X", "购买方信息 销售方信息\n名称:广州测试文化中心 名称:广州测试印刷公司\n统一社会信用代码:91110000TEST000001X 统一社会信用代码:91440101MA1234567X"), "columns");
 assert.equal(columns.fields.buyer, "广州测试文化中心"); assert.equal(columns.meta.sellerName, "广州测试印刷公司");
 const pay = doc("微信支付\n支付成功\n￥127.50\n支付时间:2026-10-21 12:00\n交易单号:TESTORDER001\n商品说明:活动海报", "payment");
 const trip = doc("滴滴行程单\n出行日期:2026-10-20\n起点:学校南门\n终点:活动会场\n同行人:测试甲、测试乙\n总计:127.50\n人民币", "trip");
 assert.equal(pay.fields.amount, "127.50"); assert.equal(trip.fields.from, "学校南门"); assert.equal(trip.taxi, true);
-let s = summary([inv, pay, trip]); assert.equal(s.fields.amount.value, "127.50"); assert.equal(s.fields.date.value, "2026-10-21"); assert.equal(s.fields.currency.value, "CNY");
+let s = summary([inv, pay, trip]); assert.equal(s.fields.amount.value, "127.50"); assert.equal(s.fields.date.value, "2026-10-20"); assert.equal(s.fields.currency.value, "CNY");
 s = summary([inv, { ...inv, id: "copy", fingerprint: "other-format" }, pay]); assert.equal(s.fields.amount.value, "127.50"); assert.equal(s.duplicates.copy, "invoice");
 s = summary([inv, { ...inv, id: "other-invoice", fingerprint: "different", fields: { ...inv.fields, invoiceNo: "99999999999999999999", buyer: "不同抬头" } }]); assert.ok(!s.fields.buyer); assert.ok(s.conflicts.some(c => c.field === "buyer")); assert.equal(s.fields.amount.value, "255.00");
 s = summary([inv, { ...pay, fields: { ...pay.fields, currency: "HKD" } }]); assert.equal(s.fields.currency.value, "HKD"); assert.equal(s.fields.amount.value, "127.50"); assert.ok(s.warnings.length);

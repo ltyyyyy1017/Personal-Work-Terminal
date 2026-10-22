@@ -38,9 +38,9 @@ export async function buildMatterReimbursementWorkbook(matter:Matter,activities:
   }
   const totals=["事务合计",...Array.from({length:8},(_,i)=>money(summaryRows.reduce((n,r)=>n+Number(r[i+1]),0))),""];
   const sumRow=add(summary,totals,[5,6,7,8,9]);sumRow.font={name:"Microsoft YaHei",size:11,bold:true};
-  const detail=sheet("全部报销明细",["序号","报销人","经办人","费用日期","报销名称","费用事项","类别","报销金额（元）","原币实付","币种","上报状态","批款状态","同行人","起点","终点","说明","核对提示","收款银行","收款账号","联系方式"],[8,18,18,15,26,28,16,20,18,12,14,14,30,28,28,36,28,26,30,24],"每项费用一行；原币实付按报销记录仅列一次，报销合计以人民币金额为准。");
+  const detail=sheet("全部报销明细",["序号","报销人","经办人","费用日期","报销名称","费用事项","类别","报销金额（元）","原币实付","币种","上报状态","批款状态","同行人","起点","终点","说明","核对提示","联系方式"],[8,18,18,15,26,28,16,20,18,12,14,14,30,28,28,36,28,24],"每项费用一行；原币实付按报销记录仅列一次，报销合计以人民币金额为准。");
   let index=0;
-  for(const a of activities)for(const [i,item] of a.items.entries())add(detail,[++index,a.submitter.trim()||"未填写",a.handler||"",a.date,a.name,item.name,a.category,item.amount,i===0?(a.paidAmount??null):null,a.currency||"CNY",isReported(a)?"已上报":"未上报",isFunded(a)?"已批款":"未批款",a.taxi?(a.taxi.companions.join("、")||"同行人待补充"):"",a.taxi?.from||"",a.taxi?.to||"",item.note||a.reason||a.note||"",[item.amount==null?"金额待补充":"",a.taxi&&!a.taxi.companions.length?"同行人待补充":""].filter(Boolean).join("；"),a.bankName||"",a.bankAccount||"",a.contact||""],[8,9]);
+  for(const a of activities)for(const [i,item] of a.items.entries())add(detail,[++index,a.submitter.trim()||"未填写",a.handler||"",a.date,a.name,item.name,a.category,item.amount,i===0?(a.paidAmount??null):null,a.currency||"CNY",isReported(a)?"已上报":"未上报",isFunded(a)?"已批款":"未批款",a.taxi?(a.taxi.companions.join("、")||"同行人待补充"):"",a.taxi?.from||"",a.taxi?.to||"",item.note||a.reason||a.note||"",[item.amount==null?"金额待补充":"",a.taxi&&!a.taxi.companions.length?"同行人待补充":""].filter(Boolean).join("；"),a.contact||""],[8,9]);
   const detailTotal=add(detail,["事务合计","","","","","","",totals[4]], [8]);detailTotal.font={name:"Microsoft YaHei",size:11,bold:true};
   const catalog=sheet("材料目录",["序号","报销人","报销名称","材料类型","包内位置","原文件名"],[8,20,28,16,90,44],"材料直接放在报销人文件夹中；文件名前缀对应报销记录，避免同名材料互相覆盖。");
   materials.forEach((m,i)=>add(catalog,[i+1,m.claimant,m.activity,m.kind,m.path,m.originalName]));

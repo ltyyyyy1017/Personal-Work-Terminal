@@ -158,6 +158,20 @@ try{
   await json(`activities/${delegated.id}`,"DELETE");assert.equal((await fetch(`${base}/api/activities/${delegated.id}`,{headers:{cookie}})).status,404);assert.equal((await fetch(`${base}/api/activities/${delegated.id}/download`,{headers:{cookie}})).status,404);
   const {readdir}=await import('node:fs/promises');assert.ok(!(await readdir(path.join(directory,'files','reimburse'))).includes(delegated.id));assert.ok(!(await readdir(path.join(directory,'exports'))).includes(delegated.id));
   console.log("PASS real TXT preview/upload, supplemental autofill, manual values retained, claimant/handler separation, no owner identity/payment defaults, ZIP/Excel and deletion cleanup");
+  const formatsActivity=(await json("activities","POST",{name:"新增格式测试",amount:20,department:"行政部",date:"2026-10-21",submitter:"测试申请人",bankName:"不应保存",bankAccount:"不应保存"})).activity;
+  assert.ok(!formatsActivity.bankName&&!formatsActivity.bankAccount);
+  const csvText='序号,起点,终点,金额\n1,"学校,东门",测试会场,20.00';
+  const formats=[['行程.csv',csvText],['材料.json',JSON.stringify({ExpenseDate:'2026-10-18',Companions:'测试同行甲、测试同行乙'})],['发票.xml','<Invoice><BuyerName>测试购买单位</BuyerName><BuyerTaxID>91110000TEST000001X</BuyerTaxID><InvoiceNumber>12345678901234567890</InvoiceNumber><TotalAmountWithTax>20.00</TotalAmountWithTax><IssueDate>2026-10-21</IssueDate></Invoice>']];
+  for(const [name,text]of formats){const form=new FormData();form.append('files',new File([text],name));const upload=await json(`activities/${formatsActivity.id}/files`,'POST',form);const id=upload.added[0].id;
+   assert.equal((await fetch(`${base}/api/activities/${formatsActivity.id}/recognize`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fileId:id})})).status,401);
+   const beforeRecognition=await readFile(path.join(directory,'store.json'),'utf8'),result=(await json(`activities/${formatsActivity.id}/recognize`,'POST',{fileId:id})).result;assert.equal(await readFile(path.join(directory,'store.json'),'utf8'),beforeRecognition);
+   if(name.endsWith('.csv'))assert.equal(result.fields.from,'学校,东门');if(name.endsWith('.json'))assert.equal(result.fields.date,'2026-10-18');if(name.endsWith('.xml')){assert.equal(result.fields.buyer,'测试购买单位');assert.equal(result.fields.date,undefined);assert.equal(result.meta.issuedAt,'2026-10-21');}
+  }
+  assert.equal((await json(`activities/${formatsActivity.id}`)).activity.date,'2026-10-21');
+  await json(`activities/${formatsActivity.id}`,'PATCH',{paidAmount:21.5});assert.equal((await json(`activities/${formatsActivity.id}`)).activity.paidAmount,21.5);
+  const formatsBuild=await json(`activities/${formatsActivity.id}/build`,'POST');for(const ext of ['.csv','.json','.xml'])assert.ok(formatsBuild.output.manifest.some(f=>f.name.endsWith(ext)));
+  const formatZip=await JSZip.loadAsync(await(await request(`activities/${formatsActivity.id}/download`)).arrayBuffer());assert.equal(await formatZip.file(Object.keys(formatZip.files).find(n=>n.endsWith('.csv'))).async('string'),trad(csvText));
+  await json(`activities/${formatsActivity.id}`,'DELETE');console.log('PASS expanded format upload/export and saved-material recognition: authentication, read-only preview, real expense dates and no bank fields');
   const bundleMatter=(await json("matters","POST",{title:"整事务打包测试",department:"行政部"})).matter;
   const bundleUrl=`matters/${bundleMatter.id}/reimbursements/export`;
   assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST"})).status,401);
@@ -190,7 +204,7 @@ try{
   assert.equal(claimantA[10],"打車同行甲、打車同行乙");assert.equal(claimantB[10],"同行人待補充");
   const allDetail=matterBook.getWorksheet('全部報銷明細');assert.ok(allDetail.getSheetValues().some(row=>row?.[6]==='第二項費用'&&row[8]===10.25));assert.equal(allDetail.getCell('H10').value,70.25);
   assert.equal(allDetail.getCell('M6').value,"打車同行甲、打車同行乙");assert.equal(allDetail.getCell('N6').value,"第一程起點");assert.equal(allDetail.getCell('O6').value,"第一程終點");assert.equal(allDetail.getCell('M8').value,"同行人待補充");assert.ok(String(allDetail.getCell('Q8').value).includes('同行人待補充'));assert.ok(!allDetail.getCell('M9').value);
-  assert.equal(allDetail.getCell('S6').value,"00001234");assert.equal(allDetail.getCell('T6').value,"TEST-PHONE");assert.equal(allDetail.autoFilter,'A5:T9');
+  assert.equal(allDetail.getCell('R6').value,"TEST-PHONE");assert.equal(allDetail.autoFilter,'A5:R9');assert.ok(!JSON.stringify(allDetail.getRow(5).values).includes('銀行'));assert.ok(!JSON.stringify(allDetail.getRow(5).values).includes('賬號'));
   const materialSheet=matterBook.getWorksheet('材料目錄');assert.equal(materialSheet.rowCount,12);for(let r=6;r<=12;r++){const relative=String(materialSheet.getCell(r,5).value),root=bundleNames.find(n=>n.endsWith('事務報銷統計表.xlsx')).split('/')[0];assert.ok(bundle.file(`${root}/${relative}`));assert.ok(['说明.txt','补充说明.txt','第二项.txt'].map(trad).includes(materialSheet.getCell(r,6).value));}
   for(const ws of matterBook.worksheets){assert.equal(trad(ws.name),ws.name);ws.eachRow(row=>row.eachCell(cell=>{if(typeof cell.value==='string')assert.equal(trad(cell.value),cell.value);}));}
   const catalog=await bundle.file(bundleNames.find(n=>n.endsWith('事務報銷清單.txt'))).async('string');assert.ok(catalog.includes('合計：¥70.25'));assert.ok(catalog.includes('測試報銷乙'));assert.ok(catalog.includes('代辦負責人'));
