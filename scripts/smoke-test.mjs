@@ -143,6 +143,10 @@ try{
   const reimbursementMatter=(await json("matters","POST",{title:"测试交通事务",department:"行政部"})).matter;
   const {activity}=await json("activities","POST",{name:"集成验证活动",itemName:"打车费用",amount:128,department:"行政部",date:"2026-10-20",contact:"",matterId:reimbursementMatter.id,reported:false,fundingStatus:"unpaid",taxi:{from:"学校",to:"会场",companions:["测试同行甲","测试同行乙"]}});
   await json("settings","PATCH",{name:"测试经办本人",reimbursement:{submitter:"个人默认姓名",phone:"个人默认电话",bankName:"个人默认银行",bankAccount:"个人默认账号"}});
+  await json("settings","PATCH",{reimbursement:{exportFormats:{"行政部":{format:"income-expense",title:"测试届次收支明細表"}}}});
+  const formatSettings=(await json("settings","PATCH",{reimbursement:{exportFormats:{"运营部":{format:"standard"}}}})).settings;
+  assert.equal(formatSettings.reimbursement.exportFormats["行政部"].title,"测试届次收支明細表");assert.equal(formatSettings.reimbursement.exportFormats["运营部"].format,"standard");
+  assert.equal((await fetch(`${base}/api/settings`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({reimbursement:{exportFormats:{"not-a-department":{format:"income-expense"}}}})})).status,400);
   const txt="报销人：测试实际报销人\n经办人：测试经办本人\n同行人：\n1. 测试同行丙\n2. 测试同行丁\n起点：学校南门\n终点：活动会场\n报销事项：活动交通";
   const textForm=new FormData();textForm.append("files",new File([txt],"同行说明.TXT",{type:"text/plain"}));
   const textPreview=(await json("reimbursement/preview","POST",textForm)).results[0];assert.equal(textPreview.method,"plain-text");assert.equal(textPreview.fields.companions,"测试同行丙、测试同行丁");assert.equal(textPreview.fields.name,"测试实际报销人");assert.equal(textPreview.fields.handler,"测试经办本人");assert.equal(textPreview.fields.from,"学校南门");assert.equal(textPreview.fields.to,"活动会场");
@@ -199,6 +203,7 @@ try{
   assert.equal(bundleNames.filter(n=>!bundle.files[n].dir&&n.endsWith('材料清單.txt')).length,0);
   const MatterExcel=(await import('exceljs')).default,matterBook=new MatterExcel.Workbook();await matterBook.xlsx.load(await bundle.file(bundleNames.find(n=>n.endsWith('事務報銷統計表.xlsx'))).async('nodebuffer'));
   const matterSummary=matterBook.getWorksheet('事務彙總');assert.ok(matterSummary);assert.ok(String(matterSummary.getCell('A1').value).includes('整事務打包測試'));
+  const incomeSheet=matterBook.worksheets[0];assert.equal(incomeSheet.name,'收支明細表');assert.ok(incomeSheet.getCell('A1').value.includes('測試屆次收支明細表'));assert.equal(incomeSheet.getCell('H4').result,70.25);assert.equal(incomeSheet.getCell('H4').formula,'SUM(F4:F7)');assert.equal(incomeSheet.getCell('F7').value,20);assert.equal(incomeSheet.getCell('G4').value,null);assert.ok(incomeSheet.getCell('E4').value.includes('同行人：打車同行甲、打車同行乙'));assert.ok(incomeSheet.getCell('E6').value.includes('測試報銷乙'));assert.equal(incomeSheet.getCell('A1').fill.fgColor.argb,'FF548235');
   const summaryRows=matterSummary.getSheetValues().filter(Boolean);const claimantA=summaryRows.find(row=>row[1]==='測試報銷甲'),claimantB=summaryRows.find(row=>row[1]==='測試報銷乙'),grand=summaryRows.find(row=>row[1]==='事務合計');
   assert.deepEqual(claimantA.slice(2,10),[2,3,5,50.25,30.25,20,30.25,20]);assert.equal(claimantB[5],20);assert.equal(grand[5],70.25);assert.equal(grand[2],3);assert.equal(grand[3],4);
   assert.equal(claimantA[10],"打車同行甲、打車同行乙");assert.equal(claimantB[10],"同行人待補充");
@@ -229,6 +234,7 @@ try{
   const zip=await JSZip.loadAsync(await (await request(`activities/${activity.id}/download`)).arrayBuffer());
   assert.ok(Object.keys(zip.files).some(n=>n.includes("打車費用-128元")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.includes("行程單")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.endsWith(".xlsx")));
   const ExcelJS=(await import("exceljs")).default,workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await zip.file(Object.keys(zip.files).find(n=>n.endsWith(".xlsx"))).async("nodebuffer"));const exported=workbook.getWorksheet("報銷信息");assert.ok(exported);const values=JSON.stringify(exported.getSheetValues());for(const expected of ["已上报","已批款","测试同行甲","测试交通事务"])assert.ok(values.includes(trad(expected)));
+  assert.equal(workbook.worksheets[0].name,'收支明細表');assert.equal(workbook.worksheets[0].getCell('H4').result,128);assert.ok(workbook.worksheets[0].getCell('B4').value instanceof Date);assert.equal(workbook.worksheets[0].getCell('B4').value.toISOString().slice(0,10),'2026-10-20');
   const backup=await JSZip.loadAsync(await (await request("backup")).arrayBuffer());
   assert.ok(!backup.file("credentials.key"));assert.ok(!backup.file("credentials.enc.json"));
   assert.ok(backup.file(`files/avatars/${avatarMember.avatar}`));

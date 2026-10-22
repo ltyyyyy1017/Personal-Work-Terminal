@@ -78,7 +78,7 @@ export async function exportMatter(ctx: Ctx) {
     assert(latest.length===exported.length&&latest.every(a=>exported.some(old=>old.id===a.id&&old.updatedAt===a.updatedAt&&a.department===matter.department)),"事务的关联报销已变化，请重新生成",409);
     catalog.push(`合计：¥${total.toFixed(2)}`,`生成时间：${new Date().toISOString()}`);
     top.file("事務報銷清單.txt",catalog.map(traditional).join("\r\n"));
-    top.file("事務報銷統計表.xlsx",await buildMatterReimbursementWorkbook(matter,exported,materials));
+    top.file("事務報銷統計表.xlsx",await buildMatterReimbursementWorkbook(matter,exported,materials,store.settings));
     const claimants=[...new Set(exported.map(a=>a.submitter.trim()||"未填写"))], joined=claimants.join("、");
     const label=shortFileBase(traditional(joined),60)+(new TextEncoder().encode(traditional(joined)).length>60?`等${claimants.length}人`:"");
     const name=`${shortFileBase(traditional(matter.title),80)}_報銷人-${label}_全部報銷材料_${toDateStr(new Date()).replace(/-/g,"")}.zip`;

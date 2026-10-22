@@ -238,6 +238,7 @@ export interface Settings {
     mergeAll: boolean;
     autoClassify: boolean;
     project: string;
+    exportFormats?:Record<string,{format:"standard"|"income-expense";title?:string}>;
   };
   calendar: {
     weekStart: 0 | 1;
