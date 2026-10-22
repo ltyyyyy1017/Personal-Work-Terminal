@@ -1,5 +1,5 @@
 import type {Task} from "./types";
-export function taskVolunteerDate(task:Pick<Task,"approvedAt"|"updatedAt">){const stamp=task.approvedAt||task.updatedAt;const date=new Date(stamp);return Number.isNaN(date.getTime())?stamp.slice(0,10):new Date(date.getTime()+8*3600_000).toISOString().slice(0,10);}
+export function taskVolunteerDate(task:Pick<Task,"approvedAt"|"updatedAt"|"workDate">){if(task.workDate!==undefined)return task.workDate;const stamp=task.approvedAt||task.updatedAt;const date=new Date(stamp);return Number.isNaN(date.getTime())?stamp.slice(0,10):new Date(date.getTime()+8*3600_000).toISOString().slice(0,10);}
 
 export function requiresMyReview(task:Task){
  return task.status==="review"||(task.reviewRequired??Boolean(task.memberIds?.length||task.assignee?.trim()));
