@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } 
 import { Upload, FileText, X, Check, ChevronLeft, LoaderCircle, RefreshCw, AlertCircle, Sparkles, ShieldCheck, Files, Pencil, ChevronDown } from "lucide-react";
 import { useDepartments, useDepartmentLabel } from "./department-context";
 import ReimbursementFields, { reimbursementValue, reimbursementBody, type ReimbursementFieldsValue } from "./reimbursement-fields";
+import {MATERIAL_ACCEPT,MATERIAL_FORMAT_LABEL,supportedMaterial,textMaterial} from "@/lib/reimbursement-formats";
 import { MAT_KINDS } from "@/lib/constants";
 import { todayStr } from "@/lib/date";
 import { organizationSettings } from "@/lib/organizations";
@@ -26,7 +27,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
   const expected = organizationSettings(settings, department).reimbursement;
   const docs = useMemo(() => entries.flatMap(e => e.result ? [{ ...e.result, kind: e.kind || e.result.kind }] : []), [entries]);
   const summary = useMemo(() => summarizeRecognition(docs), [docs]);
-  const defaults: Partial<Record<RecognitionField, string>> = { handler: settings.name || "", date: todayStr(), currency: "CNY" };
+  const defaults: Partial<Record<RecognitionField, string>> = { handler: settings.name || "", currency: "CNY" };
   const value = (key: RecognitionField) => manual[key] ?? summary.fields[key]?.value ?? (summary.conflicts.some(c => c.field === key) ? "" : defaults[key]) ?? "";
   const change = (key: RecognitionField, next: string) => { setManual(v => ({ ...v, [key]: next })); setConfirmed(false); };
   const restore = (key: RecognitionField) => { setManual(v => { const copy = { ...v }; delete copy[key]; return copy; }); setConfirmed(false); };
@@ -63,8 +64,8 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     const files = Array.from(incoming), all = [...entries.map(e => e.file), ...files];
     if (all.length > 20) { setError("一次报销最多 20 份附件，可以将其他费用另建一笔报销。"); return; }
     if (all.some(f => f.size > LIMIT || !f.size) || all.reduce((n, f) => n + f.size, 0) > TOTAL) { setError("每份附件需为 1 字节至 15 MB，合计最多 25 MB。"); return; }
-    if (files.some(f => !/\.(pdf|jpe?g|png|webp|txt)$/i.test(f.name))) { setError("支持 PDF、JPG、PNG、WebP、TXT；同行名单可直接上传 TXT。"); return; }
-    if (files.some(f => /\.txt$/i.test(f.name) && f.size > 1024 * 1024)) { setError("TXT 文件最多 1 MB。"); return; }
+    if (files.some(f => !supportedMaterial(f.name))) { setError(MATERIAL_FORMAT_LABEL); return; }
+    if (files.some(f => textMaterial(f.name) && f.size > 1024 * 1024)) { setError("文字格式最多 1 MB。"); return; }
     setEntries(list => [...list, ...files.map((file, i): Entry => ({ id: `${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 10)}`, file, status: "pending" }))]);
     setError(""); setConfirmed(false);
   }
@@ -72,7 +73,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     setEntries(list => list.map(e => {
       if (e.id !== id || !e.result) return e;
       const fields = { ...e.result.fields }; if (text.trim()) fields[key] = text; else delete fields[key];
-      return { ...e, edited: true, result: { ...e.result, fields } };
+      return { ...e, edited: true, result: { ...e.result, fields,...(key==="date"?{dateCandidates:text.trim()?[text.trim()]:[],dateBasis:"explicit" as const}:{}) } };
     })); setConfirmed(false);
   }
   function source(key: RecognitionField) {
@@ -108,7 +109,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     try {
       let current = draft;
       if (!current) {
-        const response = await fetch("/api/activities", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: value("item"), itemName: value("item"), submitter: value("name"), handler: value("handler"), bankName: value("bankName"), bankAccount: value("bankAccount"), contact: value("contact"), department, date: value("date"), reason: value("note") || value("item"), amount: rmb, paidAmount: amount, currency, reviewed: true, ...reimbursementBody(extraValue), category: extraValue.taxiEnabled ? "交通差旅" : summary.category }) });
+        const response = await fetch("/api/activities", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: value("item"), itemName: value("item"), submitter: value("name"), handler: value("handler"), contact: value("contact"), department, date: value("date"), reason: value("note") || value("item"), amount: rmb, paidAmount: amount, currency, reviewed: true, ...reimbursementBody(extraValue), category: extraValue.taxiEnabled ? "交通差旅" : summary.category }) });
         const data = await response.json(); if (!response.ok) throw new Error(data.error);
         current = { id: data.activity.id, itemId: data.activity.items[0].id }; setDraft(current);
       }
@@ -124,7 +125,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
           const prefer = (key: RecognitionField) => invoice && one && manual[key] !== undefined ? value(key) : doc?.fields[key] || (invoice && one ? value(key) : "");
           const meta = { amount: Number(doc?.fields.amount) || null,
             invoiceNo: invoice ? prefer("invoiceNo") : "", buyerName: invoice ? prefer("buyer") : "", buyerTaxId: invoice ? prefer("taxId") : "",
-            issuedAt: doc?.meta.issuedAt || doc?.fields.date || "", sellerName: doc?.meta.sellerName || "", sellerTaxId: doc?.meta.sellerTaxId || "", invoiceType: doc?.meta.invoiceType || "", currency: doc?.fields.currency || currency };
+            issuedAt: doc?.meta.issuedAt || "", sellerName: doc?.meta.sellerName || "", sellerTaxId: doc?.meta.sellerTaxId || "", invoiceType: doc?.meta.invoiceType || "", currency: doc?.fields.currency || currency };
           const response = await fetch(`/api/activities/${current.id}/files/${saved.fileId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, meta }) });
           if (!response.ok) throw new Error("附件已保存，识别信息尚未写入。请点击继续保存，无需重新上传。");
           saved.complete = true;
@@ -138,7 +139,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     <div className="intake-heading"><span className="pill blue"><Sparkles size={13}/>智能整理</span><h2>材料放进来，信息自动填好。</h2><p>发票、支付记录、订单和行程单一起上传。核对识别结果，只补充缺失的信息。</p></div>
     <section className="panel smart-upload-panel"><div className="smart-section-heading"><span>01</span><div><h3>上传本次报销材料</h3><p>无需先分类，图片、扫描 PDF 和 TXT 名单都可以识别。</p></div><small>{entries.length} / 20 份</small></div>
       <label className={`smart-upload-drop ${dragging ? "dragging" : ""}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e: DragEvent) => { e.preventDefault(); setDragging(false); add(e.dataTransfer.files); }}>
-        <span className="smart-upload-icon"><Upload size={27}/></span><strong>{entries.length ? "继续添加附件" : "点击选择，或将文件拖到这里"}</strong><span>PDF、JPG、PNG、WebP、TXT · TXT ≤ 1 MB，其他单份 ≤ 15 MB，合计 25 MB</span><input type="file" multiple hidden disabled={saving || !!draft} accept=".pdf,.jpg,.jpeg,.png,.webp,.txt" onChange={e => { add(e.target.files); e.target.value = ""; }}/>
+        <span className="smart-upload-icon"><Upload size={27}/></span><strong>{entries.length ? "继续添加附件" : "点击选择，或将文件拖到这里"}</strong><span>PDF / OFD / XML、Word / Excel、文字表格及常見圖片 · 文字 ≤ 1 MB，其他單份 ≤ 15 MB，合計 25 MB</span><input type="file" multiple hidden disabled={saving || !!draft} accept={MATERIAL_ACCEPT} onChange={e => { add(e.target.files); e.target.value = ""; }}/>
       </label>
       <div className="smart-upload-footnote"><ShieldCheck size={15}/><span>文字识别在本机完成，附件不会发送至第三方 AI 或参考网站。</span></div>
       {entries.length > 0 && <><div className="smart-recognition-progress" role="status">{reading ? <LoaderCircle size={17} className="spin"/> : <Check size={17}/>}<span>{reading ? `正在识别 ${entries.find(e => e.status === "reading")?.file.name || "附件"}…` : `已整理 ${done} 份附件`}</span><small>{done} / {entries.length}</small></div>
@@ -158,7 +159,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
         {field("item", { required: true, wide: true })}{field("name", { hint: "费用归属人，可替他人报销；未确定时可稍后补充。" })}{field("handler", { hint: "负责整理、上报材料的人，可以与报销人不同。" })}{field("contact", { placeholder: "选填，附件中出现时会自动填写" })}
         {field("amount", { type: "number", required: true, hint: "优先采用实付记录；发票与支付记录不会重复相加。" })}{field("currency", { required: true })}
         {value("currency") !== "CNY" && field("rmbAmount", { type: "number", required: true, wide: true, hint: "仅采用附件中明确的人民币结算金额，不自行猜测汇率。" })}
-        {field("date", { type: "date", required: true })}{field("invoiceNo")}
+        {field("date", { type: "date", required: true, hint: "取自行程／支付日期，未識別時請補充；不使用開票日期。" })}{field("invoiceNo")}
         {field("buyer", { hint: expected.invoiceTitle ? `本组织抬头：${expected.invoiceTitle}` : "识别到发票时自动填入；其他材料可留空。" })}{field("taxId", { hint: expected.taxId ? `本组织税号：${expected.taxId}` : "未设置默认税号时，不强制补填。" })}
         {field("note", { wide: true })}
       </div>
@@ -166,7 +167,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
       {!taxMatch && <p className="smart-notice"><AlertCircle size={16}/>识别到的税号与当前组织不一致，请核对所属部门或附件识别详情。</p>}
       {!titleMatch && <p className="smart-notice"><AlertCircle size={16}/>发票抬头与本组织预设写法不同，请对照附件核对；系统保留原件识别内容。</p>}
       {extraValue.taxiEnabled && <p className="smart-trip-summary"><Check size={16}/>已识别打车资料{value("from") || value("to") ? `：${value("from") || "出发地待补充"} → ${value("to") || "目的地待补充"}` : ""}{value("companions") ? ` · 同行人：${value("companions")}` : ""}</p>}
-      <details className="smart-intake-options" open={extraValue.taxiEnabled || undefined}><summary>关联事务、打车资料与报销进度<ChevronDown size={17}/></summary><div className="form-grid">{field("bankName", { hint: "选填，实际报销人的收款银行。" })}{field("bankAccount", { hint: "选填，不会自动使用经办人的个人账户。" })}<ReimbursementFields value={extraValue} onChange={next => { for (const key of ["from", "to", "companions"] as const) if (next[key] !== extraValue[key]) change(key, next[key]); if (next.taxiEnabled !== extraValue.taxiEnabled) setTaxiOverride(next.taxiEnabled); if (next.matterId !== extraValue.matterId) setMatterOverride(next.matterId); setExtra(next); setConfirmed(false); }} matters={matters} department={department} disabled={saving || !!draft}/></div></details>
+      <details className="smart-intake-options" open={extraValue.taxiEnabled || undefined}><summary>关联事务、打车资料与报销进度<ChevronDown size={17}/></summary><div className="form-grid"><ReimbursementFields value={extraValue} onChange={next => { for (const key of ["from", "to", "companions"] as const) if (next[key] !== extraValue[key]) change(key, next[key]); if (next.taxiEnabled !== extraValue.taxiEnabled) setTaxiOverride(next.taxiEnabled); if (next.matterId !== extraValue.matterId) setMatterOverride(next.matterId); setExtra(next); setConfirmed(false); }} matters={matters} department={department} disabled={saving || !!draft}/></div></details>
     </section>
     {error && <div className="error-banner smart-intake-error" role="alert"><AlertCircle size={18}/>{error}</div>}
     {draft && error && <p className="smart-notice">基本信息已经保存。点击继续保存即可补齐附件，不会重复建立报销。</p>}

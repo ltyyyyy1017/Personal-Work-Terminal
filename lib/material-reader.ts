@@ -8,7 +8,10 @@ import { extractTextItems, getDocumentProxy, renderPageAsImage } from "unpdf";
 import { isPdfBytes } from "./pdf";
 import { parseMaterialText, type RecognizedDocument } from "./reimbursement-recognition";
 import { decodePlainText } from "./plain-text";
-import { layoutLines, invoiceColumnText } from "./material-layout";
+import { layoutLines, invoiceColumnText,itineraryTableText } from "./material-layout";
+import {pdfOptions} from "./pdf-options";
+import {readDocumentMaterial} from "./document-material";
+import {rapidConfigured,rapidRecognize,readLegacyExcel} from "./rapid-ocr";
 
 // Keep binary model and worker lookup in Node; bundling traineddata as JS breaks OCR.
 const requireFromProject = process.getBuiltinModule("module").createRequire(path.join(process.cwd(), "package.json"));
@@ -48,33 +51,39 @@ async function ocr(bytes: Buffer) {
 }
 export async function readMaterial(bytes: Buffer, name: string, id: string): Promise<RecognizedDocument> {
   const fingerprint = crypto.createHash("sha256").update(bytes).digest("hex"), warnings: string[] = [];
-  let text = "", pages: number | undefined, method: RecognizedDocument["method"] = "pdf-text", confidence = 1;
+  let text = "", pages: number | undefined, method: RecognizedDocument["method"] = "pdf-text", confidence = 1,engine:string|undefined;
+  const imageText=async(image:Buffer)=>{
+    if(rapidConfigured())try{const result=await rapidRecognize(image);engine=result.engine;const cells=result.cells||[];const parties=invoiceColumnText(cells),trip=itineraryTableText(cells);return {text:[parties,trip,layoutLines(cells)].filter(Boolean).join("\n"),confidence:result.confidence||0};}catch{warnings.push("中文 OCR 本次未能完成，已使用備用引擎；請核對結果。");}
+    const result=await ocr(image);engine="Tesseract";return {text:result.data.text,confidence:result.data.confidence/100};
+  };
   const pageTexts: string[] = [];
   let complete = true;
   try {
-    if (/\.txt$/i.test(name)) {
-      method = "plain-text"; text = decodePlainText(bytes);
+    if (/\.(txt|md|csv|json|xml|ofd|docx?|xlsx)$/i.test(name)) {
+      method = "plain-text";const document=await readDocumentMaterial(bytes,name);text=document.cells?[invoiceColumnText(document.cells),itineraryTableText(document.cells),document.text].filter(Boolean).join("\n"):document.text;
+    } else if(/\.xls$/i.test(name)){
+      method="plain-text";const result=await readLegacyExcel(bytes);text=result.text||"";engine=result.engine;
     } else if (isPdfBytes(bytes)) {
-      const proxy = await getDocumentProxy(new Uint8Array(bytes));
+      const proxy = await getDocumentProxy(new Uint8Array(bytes),pdfOptions());
       try {
         pages = proxy.numPages;
         if (pages > 20) throw new Error("此 PDF 超过 20 页，请拆分后再识别");
         const content = await extractTextItems(proxy);
         let scanned = 0;
         for (const [i, items] of content.items.entries()) {
-          const columns = invoiceColumnText(items);
-          const pageText = columns ? `${columns}\n${layoutLines(items)}` : layoutLines(items);
+          const columns = invoiceColumnText(items),trip=itineraryTableText(items);
+          const pageText = [columns,trip,layoutLines(items)].filter(Boolean).join("\n");
           if (pageText.replace(/\s/g, "").length >= 25) { text += `${pageText}\n`; pageTexts.push(pageText); continue; }
           if (++scanned > 3) { complete = false; warnings.push("扫描 PDF 仅自动识别前三个扫描页，其余页面请拆分后补充识别；本附件未自动填写整份金额。"); break; }
           const page = await proxy.getPage(i + 1), viewport = page.getViewport({ scale: 1 });
           if (!(viewport.width > 0 && viewport.height > 0)) throw new Error("PDF 页面尺寸异常，请重新导出文件");
           const scale = Math.min(1900 / viewport.width, 2800 / viewport.height, 4);
-          const image = await renderPageAsImage(new Uint8Array(bytes), i + 1, { canvasImport: () => import("@napi-rs/canvas"), scale });
-          const result = await ocr(Buffer.from(image as ArrayBuffer)); text += `${result.data.text}\n`; pageTexts.push(result.data.text); method = "ocr"; confidence = Math.min(confidence, result.data.confidence / 100);
+          const image = await renderPageAsImage(proxy, i + 1, { canvasImport: () => import("@napi-rs/canvas"), scale });
+          const result = await imageText(Buffer.from(image as ArrayBuffer)); text += `${result.text}\n`; pageTexts.push(result.text); method = "ocr"; confidence = Math.min(confidence, result.confidence);
         }
       } finally { await proxy.loadingTask.destroy(); }
     } else {
-      const result = await ocr(bytes); text = result.data.text; confidence = result.data.confidence / 100; method = "ocr";
+      const result = await imageText(bytes); text = result.text; confidence = result.confidence; method = "ocr";
     }
     if (!text.trim()) { method = "unreadable"; warnings.push("没有读到可用文字，可以换清晰附件重试；无法识别的字段仍可手动补充。"); }
     if (method === "ocr" && confidence < .7) warnings.push("图片文字部分不清晰，自动填写的信息请重点核对。");
@@ -102,5 +111,5 @@ export async function readMaterial(bytes: Buffer, name: string, id: string): Pro
     warnings.push("同一页包含多张不同发票，请核对合计金额；未把第一张发票金额当作整份附件金额。");
   }
   if (!complete) { delete doc.fields.amount; doc.meta.amount = null; }
-  return { ...doc, warnings: [...doc.warnings, ...warnings] };
+  return { ...doc,engine, warnings: [...doc.warnings, ...warnings] };
 }

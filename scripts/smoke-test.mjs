@@ -5,6 +5,8 @@ import {tmpdir} from "node:os";
 import path from "node:path";
 import {randomBytes} from "node:crypto";
 import JSZip from "jszip";
+import {Converter} from 'opencc-js/cn2t';
+const trad=Converter({from:'cn',to:'hk'});
 import {PDFDocument} from "pdf-lib";
 import sharp from "sharp";
 
@@ -151,11 +153,63 @@ try{
   await json(`activities/${delegated.id}`,"PATCH",{submitter:"手动确认报销人",handler:"手动确认经办人"});
   await json(`activities/${delegated.id}/files`,"POST",textForm);const retained=(await json(`activities/${delegated.id}`)).activity;assert.equal(retained.submitter,"手动确认报销人");assert.equal(retained.handler,"手动确认经办人");
   const delegatedBuild=await json(`activities/${delegated.id}/build`,"POST");assert.ok(delegatedBuild.output.manifest.every(f=>f.name.endsWith('.txt')));assert.ok(!delegatedBuild.output.warnings.some(w=>w.includes('无法转换')));
-  const delegatedZip=await JSZip.loadAsync(await(await request(`activities/${delegated.id}/download`)).arrayBuffer());const packagedTxt=Object.keys(delegatedZip.files).find(n=>n.endsWith('.txt')&&!n.endsWith('材料清单.txt'));assert.equal(await delegatedZip.file(packagedTxt).async('string'),txt);
-  const DelegateExcel=(await import('exceljs')).default,delegateBook=new DelegateExcel.Workbook();await delegateBook.xlsx.load(await delegatedZip.file(Object.keys(delegatedZip.files).find(n=>n.endsWith('.xlsx'))).async('nodebuffer'));const allCells=JSON.stringify(delegateBook.worksheets.map(ws=>ws.getSheetValues()));for(const expected of ['手动确认报销人','手动确认经办人','测试同行丙'])assert.ok(allCells.includes(expected));for(const unwanted of ['个人默认姓名','个人默认电话','个人默认银行','个人默认账号'])assert.ok(!allCells.includes(unwanted));
+  const delegatedZip=await JSZip.loadAsync(await(await request(`activities/${delegated.id}/download`)).arrayBuffer());const packagedTxt=Object.keys(delegatedZip.files).find(n=>n.endsWith('.txt')&&!n.endsWith('材料清單.txt'));assert.equal(await delegatedZip.file(packagedTxt).async('string'),trad(txt));
+  const DelegateExcel=(await import('exceljs')).default,delegateBook=new DelegateExcel.Workbook();await delegateBook.xlsx.load(await delegatedZip.file(Object.keys(delegatedZip.files).find(n=>n.endsWith('.xlsx'))).async('nodebuffer'));const allCells=JSON.stringify(delegateBook.worksheets.map(ws=>ws.getSheetValues()));for(const expected of ['手动确认报销人','手动确认经办人','测试同行丙'])assert.ok(allCells.includes(trad(expected)));for(const unwanted of ['个人默认姓名','个人默认电话','个人默认银行','个人默认账号'])assert.ok(!allCells.includes(trad(unwanted)));
   await json(`activities/${delegated.id}`,"DELETE");assert.equal((await fetch(`${base}/api/activities/${delegated.id}`,{headers:{cookie}})).status,404);assert.equal((await fetch(`${base}/api/activities/${delegated.id}/download`,{headers:{cookie}})).status,404);
   const {readdir}=await import('node:fs/promises');assert.ok(!(await readdir(path.join(directory,'files','reimburse'))).includes(delegated.id));assert.ok(!(await readdir(path.join(directory,'exports'))).includes(delegated.id));
   console.log("PASS real TXT preview/upload, supplemental autofill, manual values retained, claimant/handler separation, no owner identity/payment defaults, ZIP/Excel and deletion cleanup");
+  const formatsActivity=(await json("activities","POST",{name:"新增格式测试",amount:20,department:"行政部",date:"2026-10-21",submitter:"测试申请人",bankName:"不应保存",bankAccount:"不应保存"})).activity;
+  assert.ok(!formatsActivity.bankName&&!formatsActivity.bankAccount);
+  const csvText='序号,起点,终点,金额\n1,"学校,东门",测试会场,20.00';
+  const formats=[['行程.csv',csvText],['材料.json',JSON.stringify({ExpenseDate:'2026-10-18',Companions:'测试同行甲、测试同行乙'})],['发票.xml','<Invoice><BuyerName>测试购买单位</BuyerName><BuyerTaxID>91110000TEST000001X</BuyerTaxID><InvoiceNumber>12345678901234567890</InvoiceNumber><TotalAmountWithTax>20.00</TotalAmountWithTax><IssueDate>2026-10-21</IssueDate></Invoice>']];
+  for(const [name,text]of formats){const form=new FormData();form.append('files',new File([text],name));const upload=await json(`activities/${formatsActivity.id}/files`,'POST',form);const id=upload.added[0].id;
+   assert.equal((await fetch(`${base}/api/activities/${formatsActivity.id}/recognize`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fileId:id})})).status,401);
+   const beforeRecognition=await readFile(path.join(directory,'store.json'),'utf8'),result=(await json(`activities/${formatsActivity.id}/recognize`,'POST',{fileId:id})).result;assert.equal(await readFile(path.join(directory,'store.json'),'utf8'),beforeRecognition);
+   if(name.endsWith('.csv'))assert.equal(result.fields.from,'学校,东门');if(name.endsWith('.json'))assert.equal(result.fields.date,'2026-10-18');if(name.endsWith('.xml')){assert.equal(result.fields.buyer,'测试购买单位');assert.equal(result.fields.date,undefined);assert.equal(result.meta.issuedAt,'2026-10-21');}
+  }
+  assert.equal((await json(`activities/${formatsActivity.id}`)).activity.date,'2026-10-21');
+  await json(`activities/${formatsActivity.id}`,'PATCH',{paidAmount:21.5});assert.equal((await json(`activities/${formatsActivity.id}`)).activity.paidAmount,21.5);
+  const formatsBuild=await json(`activities/${formatsActivity.id}/build`,'POST');for(const ext of ['.csv','.json','.xml'])assert.ok(formatsBuild.output.manifest.some(f=>f.name.endsWith(ext)));
+  const formatZip=await JSZip.loadAsync(await(await request(`activities/${formatsActivity.id}/download`)).arrayBuffer());assert.equal(await formatZip.file(Object.keys(formatZip.files).find(n=>n.endsWith('.csv'))).async('string'),trad(csvText));
+  await json(`activities/${formatsActivity.id}`,'DELETE');console.log('PASS expanded format upload/export and saved-material recognition: authentication, read-only preview, real expense dates and no bank fields');
+  const bundleMatter=(await json("matters","POST",{title:"整事务打包测试",department:"行政部"})).matter;
+  const bundleUrl=`matters/${bundleMatter.id}/reimbursements/export`;
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST"})).status,401);
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie,origin:"https://example.invalid"}})).status,403);
+  assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie}})).status,400);
+  const bills=[];
+  for(const submitter of ["测试报销甲","测试报销乙","测试报销甲"]){
+    const a=(await json("activities","POST",{name:"同名交通报销",submitter,handler:"代办负责人",itemName:"交通",amount:20,department:"行政部",matterId:bundleMatter.id})).activity;bills.push(a);
+    if(bills.length===1)assert.equal((await fetch(`${base}/api/${bundleUrl}`,{method:"POST",headers:{cookie}})).status,400);
+    const form=new FormData();form.append("files",new File(["同行人：测试同行一、测试同行二"],"说明.txt",{type:"text/plain"}));form.append("kind","其他");form.append("skipRecognition","true");
+    const legacy=await json(`activities/${a.id}/files`,"POST",form);assert.equal(legacy.added[0].kind,"其他");
+    const other=new FormData();other.append("files",new File(["保管说明：测试材料用途"],"补充说明.txt",{type:"text/plain"}));other.append("skipRecognition","true");await json(`activities/${a.id}/files`,"POST",other);
+  }
+  const secondItem=(await json(`activities/${bills[0].id}/items`,"POST",{name:"第二项费用",amount:10.25})).item;
+  const secondFile=new FormData();secondFile.append("files",new File(["补充说明：第二项费用"],"第二项.txt",{type:"text/plain"}));secondFile.append("itemId",secondItem.id);secondFile.append("skipRecognition","true");await json(`activities/${bills[0].id}/files`,"POST",secondFile);
+  await json(`activities/${bills[0].id}`,"PATCH",{reported:true,fundingStatus:"paid",bankName:"报销人银行",bankAccount:"00001234",contact:"TEST-PHONE",taxi:{from:"第一程起点",to:"第一程终点",companions:["打车同行甲","打车同行乙"]}});
+  await json(`activities/${bills[1].id}`,"PATCH",{reported:true,taxi:{from:"第二程起点",to:"第二程终点",companions:[]}});
+  const firstPack=await json(`activities/${bills[0].id}/build`,"POST");assert.ok(firstPack.output.zipName.includes("報銷人-測試報銷甲"));assert.ok(!firstPack.output.zipName.includes("代辦負責人"));assert.ok(firstPack.output.manifest.some(f=>f.kind==="同行人"&&f.name.includes("同行人")));assert.ok(firstPack.output.manifest.some(f=>f.kind==="其他"&&f.name.includes("其他")));
+  const bundleResponse=await request(bundleUrl,"POST");assert.equal(bundleResponse.headers.get('cache-control'),'no-store');assert.equal(bundleResponse.headers.get('x-workbench-activity-count'),'3');const disposition=decodeURIComponent(bundleResponse.headers.get('content-disposition'));assert.ok(disposition.includes('測試報銷甲、測試報銷乙'));assert.ok(disposition.includes('整事務打包測試'));
+  const bundle=await JSZip.loadAsync(await bundleResponse.arrayBuffer()),bundleNames=Object.keys(bundle.files);assert.ok(bundleNames.some(n=>n.includes('/報銷人-測試報銷甲/1-1')));assert.ok(bundleNames.some(n=>n.includes('/報銷人-測試報銷甲/3-1')));assert.ok(bundleNames.some(n=>n.includes('/報銷人-測試報銷乙/1-1')));assert.equal(bundleNames.filter(n=>n.endsWith('.xlsx')).length,1);assert.ok(!bundleNames.some(n=>n.endsWith('.zip')));assert.ok(bundleNames.some(n=>n.includes('同行人')&&n.endsWith('.txt')));assert.ok(!bundleNames.some(n=>n.includes('集成验证活动')));
+  for(const name of bundleNames.filter(n=>!bundle.files[n].dir&&n.split('/').length===3))assert.match(name.split('/').at(-1),/^\d+-\d+【/);
+  assert.ok(bundleNames.some(n=>n.includes('/報銷人-測試報銷甲/2-1')));assert.ok(bundleNames.some(n=>n.includes('/報銷人-測試報銷甲/1-2')));
+  for(const name of bundleNames)assert.equal(trad(name),name);
+  for(const name of bundleNames.filter(n=>!bundle.files[n].dir)){const parts=name.split('/');assert.equal(parts.length,name.endsWith('事務報銷統計表.xlsx')||name.endsWith('事務報銷清單.txt')?2:3,name);}
+  assert.equal(bundleNames.filter(n=>!bundle.files[n].dir&&n.endsWith('材料清單.txt')).length,0);
+  const MatterExcel=(await import('exceljs')).default,matterBook=new MatterExcel.Workbook();await matterBook.xlsx.load(await bundle.file(bundleNames.find(n=>n.endsWith('事務報銷統計表.xlsx'))).async('nodebuffer'));
+  const matterSummary=matterBook.getWorksheet('事務彙總');assert.ok(matterSummary);assert.ok(String(matterSummary.getCell('A1').value).includes('整事務打包測試'));
+  const summaryRows=matterSummary.getSheetValues().filter(Boolean);const claimantA=summaryRows.find(row=>row[1]==='測試報銷甲'),claimantB=summaryRows.find(row=>row[1]==='測試報銷乙'),grand=summaryRows.find(row=>row[1]==='事務合計');
+  assert.deepEqual(claimantA.slice(2,10),[2,3,5,50.25,30.25,20,30.25,20]);assert.equal(claimantB[5],20);assert.equal(grand[5],70.25);assert.equal(grand[2],3);assert.equal(grand[3],4);
+  assert.equal(claimantA[10],"打車同行甲、打車同行乙");assert.equal(claimantB[10],"同行人待補充");
+  const allDetail=matterBook.getWorksheet('全部報銷明細');assert.ok(allDetail.getSheetValues().some(row=>row?.[6]==='第二項費用'&&row[8]===10.25));assert.equal(allDetail.getCell('H10').value,70.25);
+  assert.equal(allDetail.getCell('M6').value,"打車同行甲、打車同行乙");assert.equal(allDetail.getCell('N6').value,"第一程起點");assert.equal(allDetail.getCell('O6').value,"第一程終點");assert.equal(allDetail.getCell('M8').value,"同行人待補充");assert.ok(String(allDetail.getCell('Q8').value).includes('同行人待補充'));assert.ok(!allDetail.getCell('M9').value);
+  assert.equal(allDetail.getCell('R6').value,"TEST-PHONE");assert.equal(allDetail.autoFilter,'A5:R9');assert.ok(!JSON.stringify(allDetail.getRow(5).values).includes('銀行'));assert.ok(!JSON.stringify(allDetail.getRow(5).values).includes('賬號'));
+  const materialSheet=matterBook.getWorksheet('材料目錄');assert.equal(materialSheet.rowCount,12);for(let r=6;r<=12;r++){const relative=String(materialSheet.getCell(r,5).value),root=bundleNames.find(n=>n.endsWith('事務報銷統計表.xlsx')).split('/')[0];assert.ok(bundle.file(`${root}/${relative}`));assert.ok(['说明.txt','补充说明.txt','第二项.txt'].map(trad).includes(materialSheet.getCell(r,6).value));}
+  for(const ws of matterBook.worksheets){assert.equal(trad(ws.name),ws.name);ws.eachRow(row=>row.eachCell(cell=>{if(typeof cell.value==='string')assert.equal(trad(cell.value),cell.value);}));}
+  const catalog=await bundle.file(bundleNames.find(n=>n.endsWith('事務報銷清單.txt'))).async('string');assert.ok(catalog.includes('合計：¥70.25'));assert.ok(catalog.includes('測試報銷乙'));assert.ok(catalog.includes('代辦負責人'));
+  for(const a of bills)await json(`activities/${a.id}`,"DELETE");await json(`matters/${bundleMatter.id}`,"DELETE");
+  console.log("PASS claimant ZIP filenames, legacy companion labels, genuine other materials, whole-matter export/auth/empty guards, per-person folders, duplicate names and complete catalog");
   assert.equal(activity.contact,"");assert.equal(activity.matterId,reimbursementMatter.id);assert.equal(activity.category,"交通差旅");assert.deepEqual(activity.taxi.companions,["测试同行甲","测试同行乙"]);
   const prematureFunding=await fetch(`${base}/api/activities/${activity.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({fundingStatus:"paid"})});assert.equal(prematureFunding.status,400);
   assert.equal((await json(`activities/${activity.id}`)).activity.fundingStatus,"unpaid");
@@ -173,8 +227,8 @@ try{
   const built=await json(`activities/${activity.id}/build`,"POST");assert.equal(built.activity.status,"packaged");assert.equal(built.output.totalAmount,128);
   assert.equal(built.activity.reported,true);assert.equal(built.activity.fundingStatus,"paid");
   const zip=await JSZip.loadAsync(await (await request(`activities/${activity.id}/download`)).arrayBuffer());
-  assert.ok(Object.keys(zip.files).some(n=>n.includes("打车费用-128元")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.includes("行程单")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.endsWith(".xlsx")));
-  const ExcelJS=(await import("exceljs")).default,workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await zip.file(Object.keys(zip.files).find(n=>n.endsWith(".xlsx"))).async("nodebuffer"));const exported=workbook.getWorksheet("报销信息");assert.ok(exported);const values=JSON.stringify(exported.getSheetValues());for(const expected of ["已上报","已批款","测试同行甲","测试交通事务"])assert.ok(values.includes(expected));
+  assert.ok(Object.keys(zip.files).some(n=>n.includes("打車費用-128元")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.includes("行程單")&&n.endsWith(".pdf")));assert.ok(Object.keys(zip.files).some(n=>n.endsWith(".xlsx")));
+  const ExcelJS=(await import("exceljs")).default,workbook=new ExcelJS.Workbook();await workbook.xlsx.load(await zip.file(Object.keys(zip.files).find(n=>n.endsWith(".xlsx"))).async("nodebuffer"));const exported=workbook.getWorksheet("報銷信息");assert.ok(exported);const values=JSON.stringify(exported.getSheetValues());for(const expected of ["已上报","已批款","测试同行甲","测试交通事务"])assert.ok(values.includes(trad(expected)));
   const backup=await JSZip.loadAsync(await (await request("backup")).arrayBuffer());
   assert.ok(!backup.file("credentials.key"));assert.ok(!backup.file("credentials.enc.json"));
   assert.ok(backup.file(`files/avatars/${avatarMember.avatar}`));

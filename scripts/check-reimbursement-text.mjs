@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import ts from "typescript";
 const folder = path.resolve("runtime/reimbursement-text-check"); await fs.mkdir(folder, { recursive: true });
-const modules = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "material-reader"];
+const modules = ["errors", "invoice", "pdf", "reimbursement-recognition", "plain-text", "material-layout", "pdf-options", "expense-date", "rapid-ocr", "document-material", "material-reader"];
 for (const name of modules) {
   let source = await fs.readFile(`lib/${name}.ts`, "utf8");
   for (const dep of modules) source = source.replaceAll(`"./${dep}"`, `"./${dep}.mjs"`);
@@ -30,6 +30,8 @@ assert.equal(doc("乘车人姓名：乘客甲\n付款人姓名：付款乙").fie
 assert.equal(doc("报销人收款银行：示例银行\n报销人收款账号：TESTACCOUNT\n报销人联系方式：TESTPHONE").fields.name,undefined);
 assert.equal(doc("报销人：\n经办人：测试经办").fields.name,undefined);
 assert.equal(doc("同行人：测试甲、测试乙\n报销人：测试丙").fields.companions,"测试甲、测试乙");
+assert.equal(doc("同行人：测试甲、测试乙").kind,"同行人");
+assert.equal(doc("保管说明：活动材料").kind,"其他");
 for (const input of ["上车地点：学校南门  下车地点：活动会场  里程：5公里", "起点\n学校南门\n终点\n活动会场", "起点\n终点\n学校南门\n活动会场", "序号\t车型\t起点\t终点\t金额\n1\t快车\t学校南门\t活动会场\t20.00", "起点  终点\n学校南门  活动会场"]) {
   const result = doc(`滴滴行程单\n${input}`); assert.equal(result.fields.from,"学校南门",input);assert.equal(result.fields.to,"活动会场",input);
 }

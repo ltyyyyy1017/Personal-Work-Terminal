@@ -26,3 +26,7 @@
 .legacy-billing{background:#f4f8ff;border:1px solid #e3ecfb;border-radius:9px;padding:13px;margin-bottom:19px}.legacy-billing p{font-size:10px;line-height:1.9;color:#97a9c4}.legacy-billing .text-button{margin-top:8px;font-size:10px}
 
 .reimbursement-list-item{display:flex;align-items:center;border-top:1px solid var(--line,#e5eaf2);gap:8px;padding-right:18px}.reimbursement-list-item>.activity-row{flex:1;min-width:0;border:0}.reimbursement-delete{flex-shrink:0;color:#b95656;min-width:44px;min-height:44px}.reimbursement-delete:hover{background:#ffebeb}.reimbursement-heading-actions{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.reimbursement-heading-actions .danger{color:#b03939}
+
+.matter-export{padding:0 24px 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.matter-export .error-text{margin:0;flex-basis:100%;overflow-wrap:anywhere}
+
+.reread-toggle{display:flex;align-items:center;gap:10px;min-height:44px;font-size:14px;font-weight:600}.field .reread-toggle input[type=checkbox],.reread-toggle input[type=checkbox]{width:18px;min-width:18px;height:18px;min-height:18px;padding:0;margin:0;accent-color:#007aff;flex-shrink:0}

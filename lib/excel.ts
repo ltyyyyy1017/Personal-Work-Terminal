@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import {traditionalWorkbook} from "./export-traditional";
 import type { NamingPlanRow } from "./naming";
 import { rmbUpper } from "./naming";
 import type { ReimbActivity, Settings } from "./types";
@@ -316,11 +317,7 @@ export async function buildReimburseWorkbook(opts: {
   borderRange(cover, r, 1, r, 4);
   r++;
 
-  const bank = activity.bankAccount
-    ? `${activity.bankName || ""} ${activity.bankAccount}`.trim()
-    : "";
   for (const [label, value] of [
-    ["收款账户", bank],
     ["发票抬头", settings.reimbursement.invoiceTitle],
     ["纳税人识别号", settings.reimbursement.taxId],
     ["备注", activity.note || ""],
@@ -426,6 +423,7 @@ export async function buildReimburseWorkbook(opts: {
   const matter=opts.matterTitle||activity.matterId||"未关联";
   const rows=[['报销名称',activity.name],['报销人',activity.submitter],['经办人',activity.handler||'未填写'],['联系方式',activity.contact||'未填写'],['关联事务',matter],['上报状态',isReported(activity)?'已上报':'未上报'],['批款状态',isFunded(activity)?'已批款':'未批款'],...(activity.taxi?[['交通类型','打车'],['出发地',activity.taxi.from||'未填写'],['目的地',activity.taxi.to||'未填写'],['同行人',activity.taxi.companions.join('、')||'无 / 未填写'],['行程单附件',String(activity.files.filter(f=>f.kind==='行程单').length)+' 份']]:[])];
   for(const [key,value] of rows){const r=info.addRow([key,value]);styleLabel(r.getCell(1),key);styleValue(r.getCell(2),value);r.height=30;}
+  traditionalWorkbook(wb);
   const buf = await wb.xlsx.writeBuffer();
   return {
     buffer: Buffer.from(buf as ArrayBuffer),

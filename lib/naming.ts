@@ -1,5 +1,7 @@
 import { DEFAULT_NAMING, KIND_ORDER } from "./constants";
 import type { ReimbActivity, ReimbFile, ReimbItem } from "./types";
+import {traditional} from "./export-traditional";
+import {exportExtension,MATERIAL_EXTENSIONS} from "./reimbursement-formats";
 
 /** 128 / 128.5 / 1280.05，去掉多余小数位 */
 export function formatAmount(n: number | null | undefined): string {
@@ -31,7 +33,7 @@ export function materialFileName(opts: {
   amount: number | null;
   kind: string;
   template?: string;
-  extension?: ".pdf" | ".txt";
+  extension?: string;
 }): string {
   const template = opts.template || DEFAULT_NAMING;
   const base = template
@@ -40,7 +42,24 @@ export function materialFileName(opts: {
     .replace(/\{amount\}/g, formatAmount(opts.amount))
     .replace(/\{kind\}/g, opts.kind)
     .replace(/\{date\}/g, "");
-  return `${sanitizeFileBase(base)}${opts.extension || ".pdf"}`;
+  const safeBase = shortFileBase(traditional(base), 180);
+  const label = opts.kind === "同行人" && !safeBase.includes("同行人") ? `${safeBase}-同行人` : safeBase;
+  const extension=opts.extension||".pdf";if(!MATERIAL_EXTENSIONS.includes(extension as typeof MATERIAL_EXTENSIONS[number]))throw new Error("不支援的匯出格式");
+  return `${label}${extension}`;
+}
+
+export function shortFileBase(name: string, maxBytes: number): string {
+  let result = "";
+  const encoder = new TextEncoder();
+  for (const char of sanitizeFileBase(name)) {
+    if (encoder.encode(result + char).length > maxBytes) break;
+    result += char;
+  }
+  return result.trim();
+}
+
+export function reimbursementPackageBase(activity: Pick<ReimbActivity, "name" | "submitter">): string {
+  return traditional(`报销人-${shortFileBase(traditional(activity.submitter), 60) || "未填写"}_${shortFileBase(traditional(activity.name), 100) || "未命名"}_报销材料`);
 }
 
 export function kindRank(kind: string): number {
@@ -93,7 +112,7 @@ export function namingPlan(
           amount: item.amount,
           kind: file.kind,
           template,
-          extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
+          extension: exportExtension(file.originalName),
         }),
       });
     });
@@ -114,7 +133,7 @@ export function namingPlan(
         amount: null,
         kind: file.kind,
         template,
-        extension: /\.txt$/i.test(file.originalName) ? ".txt" : ".pdf",
+        extension: exportExtension(file.originalName),
       }),
     });
   });
@@ -126,6 +145,7 @@ export function suggestKind(fileName: string, text?: string): ReimbFile["kind"] 
   const n = fileName.toLowerCase();
   if (/行程单|行程|itinerary|e-ticket/.test(n)) return "行程单";
   if (/发票|invoice|fapiao|数电票/.test(n)) return "发票";
+  if (/同行|同乘/.test(n)) return "同行人";
   if (/销售单|销售|sales/.test(n)) return "销售单";
   if (/送货单|送货|配送/.test(n)) return "送货单";
   if (/清单|明细|报价|采购单|订单/.test(n)) return "清单";
@@ -139,6 +159,7 @@ export function suggestKind(fileName: string, text?: string): ReimbFile["kind"] 
   if (/送货单/.test(t)) return "送货单";
   if (/销售单/.test(t)) return "销售单";
   if (/收据|收款收据/.test(t)) return "收据";
+  if (/同行人(?:员|員)?[:：]|同行者[:：]|同乘人(?:员|員)?[:：]|同行名单|同行名單/.test(t)) return "同行人";
   return "其他";
 }
 
