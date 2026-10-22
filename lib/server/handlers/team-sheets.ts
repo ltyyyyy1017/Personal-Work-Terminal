@@ -15,3 +15,10 @@ export async function configure(ctx:Ctx){const b=await ctx.body<Record<string,un
  await mutateStore(s=>{const old=s.teamSheets,same=old?.taskFileId===taskFileId&&old.hoursFileId===hoursFileId;s.teamSheets={...(same?old:undefined),enabled:true,department,taskFileId,hoursFileId,academicYear,enabledAt:same?old!.enabledAt:nowISO(),volunteers:same?old!.volunteers:[],issues:same?old!.issues:[],importedCount:same?old!.importedCount:0,taskHashes:same?old!.taskHashes:{}};});return status();
 }
 export async function sync(){await runTeamSheetSync("all");return status();}
+
+export async function destinations(){
+ const config=readStore().teamSheets;assert(config?.enabled,"請先連接團學表格");const client=await tencentClient();
+ const [tasks,hours]=await Promise.all([client.info(config.taskFileId),client.info(config.hoursFileId)]);
+ const choices=(sheets:typeof tasks.sheets)=>sheets.filter(s=>s.sheet_type==="worksheet"&&!s.hidden&&!/基准模板|基準模板|工作台同步/.test(s.sheet_name)).map(s=>({id:s.sheet_id,name:s.sheet_name}));
+ return json({tasks:choices(tasks.sheets),hours:choices(hours.sheets)});
+}

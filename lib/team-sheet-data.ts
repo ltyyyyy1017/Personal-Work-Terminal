@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import type {SheetInfo,SheetCell} from "./tencent-docs";
 import type {Member,Task,SyncedVolunteer} from "./types";
+import {isVolunteerLeader} from "./task-reporting";
 export interface SheetSnapshot {sheet:SheetInfo;cells:SheetCell[]}
-export interface ImportedAssignment {key:string;matter:string;title:string;date:string;phase:string;names:string[];memberIds:string[];done:boolean;refs:string[]}
+export interface ImportedAssignment {key:string;matter:string;title:string;date:string;phase:string;names:string[];memberIds:string[];done:boolean;refs:string[];sheetId?:string;rows?:Record<string,number>}
 export const digest=(v:unknown)=>crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0,24);
 export const normalized=(v:string)=>v.normalize("NFKC").replace(/\s+/g,"").toLocaleLowerCase();
 export function cellValue(c:SheetCell):string|number|boolean{return c.value_type==="NUMBER"?c.number_value??0:c.value_type==="BOOL"?c.bool_value??false:c.string_value||"";}
@@ -33,8 +34,8 @@ export function parseAssignments(snapshots:SheetSnapshot[],file:string,departmen
    const identity=digest([sheet.sheet_id,normalized(title),names.map(normalized).sort(),date,rawDate]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
    const ref=`td:task:${file}:${sheet.sheet_id}:${identity}:${occurrence}`,groupKey=digest([sheet.sheet_id,normalized(title),date,rawDate||phase]);
    const existing=groups.get(groupKey),done=/^(已完成|完成|通过|通過)$/.test(rowText(row,5));
-   if(existing){existing.names=[...new Set([...existing.names,...names])];existing.memberIds=[...new Set([...existing.memberIds,...ids])];existing.done=existing.done&&done;existing.refs.push(ref);}
-   else groups.set(groupKey,{key:`td:assignment:${file}:${groupKey}`,matter:sheet.sheet_name,title,date,phase,names,memberIds:ids,done,refs:[ref]});
+   if(existing){existing.names=[...new Set([...existing.names,...names])];existing.memberIds=[...new Set([...existing.memberIds,...ids])];existing.done=existing.done&&done;existing.refs.push(ref);if(names.length===1&&ids.length===1)(existing.rows??={})[ids[0]]=index;}
+   else groups.set(groupKey,{key:`td:assignment:${file}:${groupKey}`,matter:sheet.sheet_name,title,date,phase,names,memberIds:ids,done,refs:[ref],sheetId:sheet.sheet_id,rows:names.length===1&&ids.length===1?{[ids[0]]:index}:{}});
   }
  }
  return [...groups.values()];
@@ -54,7 +55,7 @@ export function parseVolunteer(snapshots:SheetSnapshot[],file:string,department:
    let date=sheetDate(rowText(row,7),year)||sheetDate(detail,year);if(!date){const matching=assignments.filter(a=>a.names.some(n=>normalized(n)===normalized(name))&&normalized(a.title)===normalized(titleValue)&&a.date);if(matching.length===1)date=matching[0].date;}
    const localTaskId=managed?rowText(row,8):undefined,identity=digest([sheet.sheet_id,normalized(name),normalized(titleValue),normalized(detail),managed?rowText(row,9):""]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
    const key=`td:hours:${file}:${sheet.sheet_id}:${identity}:${occurrence}`;
-   records.push({id:key,memberId,name,title:titleValue,matterTitle:managed?rowText(row,10):sheet.sheet_name,date,hours,workHours,entered:/^已录入|^已錄入/.test(rowText(row,6)),detail,sourceRefs:[key],localTaskId:localTaskId||undefined,localVersion:managed?rowText(row,12):undefined});
+   records.push({id:key,sheetId:sheet.sheet_id,row:index,memberId,name,title:titleValue,matterTitle:managed?rowText(row,10):sheet.sheet_name,date,hours,workHours,entered:/^已录入|^已錄入/.test(rowText(row,6)),detail,sourceRefs:[key],localTaskId:localTaskId||undefined,localVersion:managed?rowText(row,12):undefined});
    if(!memberId)issues.push(`「${name}」未能對應本部門唯一成員，其 ${hours??"待確認"} 小時保留於同步明細，暫不計入成員總計。`);
    if(hours===null&&!managed)issues.push(`${name} · ${titleValue}：來源沒有可確認的時長，暫不計入。`);
   }
@@ -62,6 +63,7 @@ export function parseVolunteer(snapshots:SheetSnapshot[],file:string,department:
  return {records,issues:[...new Set(issues)]};
 }
 export function taskSyncPayload(task:Task,members:Member[],matterTitle:string){
+ if(task.reportToTeamSheets===false)return [];
  const ids=task.memberIds?.length?task.memberIds:[""];
- return ids.map(memberId=>({key:`wb:${task.id}:${memberId||"unassigned"}`,taskId:task.id,memberId,name:members.find(m=>m.id===memberId)?.name||task.assignee||"",title:task.title,date:task.workDate||task.due?.slice(0,10)||"",status:task.status,hours:task.status==="done"&&typeof task.volunteerHours?.[memberId]==="number"?task.volunteerHours[memberId]:null,entered:task.volunteerEntered===true,matter:matterTitle,updatedAt:task.updatedAt}));
+ return ids.map(memberId=>{const member=members.find(m=>m.id===memberId),countHours=!isVolunteerLeader(member);return {key:`wb:${task.id}:${memberId||"unassigned"}`,taskId:task.id,memberId,name:member?.name||task.assignee||"",title:task.title,description:task.sourceRefs?.some(r=>r.startsWith("td:"))?"":task.note||"",date:task.workDate||task.due?.slice(0,10)||"",status:task.status,hours:countHours&&task.status==="done"&&typeof task.volunteerHours?.[memberId]==="number"?task.volunteerHours[memberId]:null,entered:countHours&&task.volunteerEntered===true,matter:matterTitle,updatedAt:task.updatedAt};});
 }
