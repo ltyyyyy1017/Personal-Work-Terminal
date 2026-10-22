@@ -1,0 +1,8 @@
+"use client";
+import {useState} from "react";
+import type {Member,Settings} from "@/lib/types";
+import {myCalendarIdentity} from "@/lib/calendar-entries";
+export default function CalendarIdentity({members,settings,onSave}:{members:Member[];settings:Settings;onSave:(body:unknown)=>Promise<void>}){
+ const [busy,setBusy]=useState(false),[error,setError]=useState("");const identity=myCalendarIdentity({members,settings});
+ return <section className="panel settings-panel"><div className="panel-heading"><div><h2>我的日程身份</h2><p>只顯示本人執行或明確負責的工作，其他成員的工作保留在部門事務中。</p></div></div><form key={settings.updatedAt} onSubmit={async e=>{e.preventDefault();setBusy(true);setError("");const form=new FormData(e.currentTarget);try{await onSave({calendar:{myMemberIds:form.getAll("myMemberIds"),myNames:String(form.get("myNames")||"").split(/[、,，;；\n]+/).map(v=>v.trim()).filter(Boolean)}});}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><fieldset className="field"><legend>名單中哪些身份是你本人？</legend><div className="member-picker-list">{members.map(m=><label className="record-confirm" key={m.id}><input type="checkbox" name="myMemberIds" value={m.id} defaultChecked={identity.ids.has(m.id)}/><span>{m.name} · {m.department}</span></label>)}</div></fieldset><label className="field"><span>原表中的姓名／別名（每行一個）</span><textarea name="myNames" rows={3} maxLength={2000} defaultValue={settings.calendar.myNames?.join("\n")||""} placeholder="可填入簡體、繁體姓名或英文名"/></label>{error&&<p role="alert" className="error-text">{error}</p>}<button className="button primary" disabled={busy}>{busy?"保存中…":"保存本人身份"}</button></form></section>;
+}

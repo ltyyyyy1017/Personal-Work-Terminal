@@ -46,6 +46,10 @@ try{
   assert.ok(!JSON.stringify(workspace).includes("fake-test-secret"));assert.equal(workspace.resources[0].username,"test-user");
   assert.ok(!(await readFile(path.join(directory,"credentials.enc.json"),"utf8")).includes("fake-test-secret"));
   assert.equal((await json("workspace/credential","POST",{id:"test-site",authorization:(await json("workspace/credential/authorize","POST",{id:"test-site",operation:"copy",current:password})).authorization})).password,"fake-test-secret");
+  await json("settings","PATCH",{calendar:{myMemberIds:[workspace.members[0].id],myNames:["測試本人","测试本人"]}});
+  const personalSettings=(await json("state")).settings;assert.deepEqual(personalSettings.calendar.myMemberIds,[workspace.members[0].id]);assert.equal(personalSettings.calendar.myNames.length,2);
+  for(const calendar of [{myMemberIds:["not-a-member"]},{myNames:[{}]},{myMemberIds:"invalid"}])assert.equal((await fetch(`${base}/api/settings`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({calendar})})).status,400);
+  assert.deepEqual((await json("state")).settings,personalSettings);
   const participants=workspace.members.filter(m=>m.department==="运营部").map(m=>m.id);
   await json(`members/${participants[0]}`,"PATCH",{name:"测试成员改名",role:"干事",phone:"000-test",preference:"摄影",note:"编辑验证"});
   await json("members/order","PATCH",{ids:[participants[1],participants[0]]});
