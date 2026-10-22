@@ -5,7 +5,9 @@ data
 runtime
 preview
 assets
-scripts
+scripts/*
+!scripts/ocr-worker.py
+!scripts/ocr-requirements.txt
 .git
 .env*
 *.docx

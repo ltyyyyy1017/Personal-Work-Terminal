@@ -13,6 +13,8 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3939 TZ=
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
 COPY --from=build --chown=node:node /app/browser-helper ./browser-helper
+COPY --from=build --chown=node:node /app/scripts/ocr-worker.py ./scripts/ocr-worker.py
+COPY --from=build --chown=node:node /app/scripts/ocr-requirements.txt ./scripts/ocr-requirements.txt
 RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3939
