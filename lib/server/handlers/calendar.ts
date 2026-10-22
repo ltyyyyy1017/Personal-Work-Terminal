@@ -1,4 +1,6 @@
 import { mutateStore, newId, nowISO, readStore } from "../../store";
+import {tencentClient} from "../../tencent-docs";
+import {volunteerMemberIds} from "../../task-reporting";
 import {scheduleTeamSheetPush} from "../../team-sheet-sync";
 import { bool, isDateLike, json, str } from "../http";
 import { AppError, assert } from "../../errors";
@@ -164,10 +166,20 @@ export async function createTask(ctx: Ctx) {
 
 export async function patchTask(ctx: Ctx) {
   const body = (await ctx.body()) as Record<string, unknown>;
+  let destination:Task["sheetDestination"];
+  if(body.reportToTeamSheets===true&&readStore().teamSheets?.enabled){
+    const c=readStore().teamSheets!;
+    const raw=body.sheetDestination as Record<string,unknown>|undefined;assert(raw&&typeof raw==="object","請選擇任務表與志願時表的原有頁籤");
+    const taskSheetId=str(raw.taskSheetId,"",100),hoursSheetId=str(raw.hoursSheetId,"",100);assert(taskSheetId&&hoursSheetId&&(raw.hoursKind==="online"||raw.hoursKind==="offline"),"請選擇完整的原表位置");
+    const client=await tencentClient(),[taskInfo,hoursInfo]=await Promise.all([client.info(c.taskFileId),client.info(c.hoursFileId)]);
+    const valid=(s:typeof taskInfo.sheets,id:string)=>s.some(t=>t.sheet_id===id&&t.sheet_type==="worksheet"&&!t.hidden&&!/基准模板|基準模板|工作台同步/.test(t.sheet_name));
+    assert(valid(taskInfo.sheets,taskSheetId)&&valid(hoursInfo.sheets,hoursSheetId),"請選擇兩張文件中的原有事項頁籤");destination={taskSheetId,hoursSheetId,hoursKind:raw.hoursKind};
+  }
   const { result } = await mutateStore((s) => {
     const task = s.tasks.find((t) => t.id === ctx.params.id);
     if (!task) throw new AppError("任务不存在", 404);
-    const previousStatus=task.status;
+    const previousStatus=task.status,previousReport=task.reportToTeamSheets;
+    if(destination)task.sheetDestination=destination;
     if (typeof body.title === "string") task.title = str(body.title).trim() || task.title;
     if (["todo", "doing", "waiting", "review", "done"].includes(body.status as string)) task.status = body.status==="review"||body.status==="done"?body.status:"doing";
     if ("assignee" in body) task.assignee = str(body.assignee, "", 60);
@@ -187,20 +199,30 @@ export async function patchTask(ctx: Ctx) {
     task.memberIds=memberIds(s,"memberIds" in body?body.memberIds:task.memberIds||[],task.department);
     task.organization=organizationFor(task.department,s.settings);
     task.matterId=validateMatter(s,"matterId" in body?body.matterId:task.matterId,task.department);
-    if(previousMembers!==JSON.stringify(task.memberIds)&&task.status==="done"&&!("volunteerHours" in body)){assert(body.status!=="done","执行成员已变更，请重新确认志愿时");task.status="review";}
+    if("reportToTeamSheets" in body){assert(typeof body.reportToTeamSheets==="boolean","請選擇是否計入團委表格");assert(task.department==="运营部","只有运营部任務需要選擇團委上報方式");task.reportToTeamSheets=body.reportToTeamSheets;}
+    const publicity=task.department==="运营部",personal=task.reportToTeamSheets===false;
+    const countable=volunteerMemberIds(task,s.members);
+    if(publicity&&task.status==="done"&&(previousStatus!=="done"||"volunteerHours" in body))assert(typeof task.reportToTeamSheets==="boolean","完結前請選擇是否計入團委表格");
+    if(previousMembers!==JSON.stringify(task.memberIds)&&task.status==="done"&&publicity&&!personal&&countable.length&&!("volunteerHours" in body)){assert(body.status!=="done","执行成员已变更，请重新确认志愿时");task.status="review";}
     task.assignee=(task.memberIds||[]).map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
-    if(task.department==="运营部"&&"volunteerHours" in body){
+    if(publicity&&!personal&&"volunteerHours" in body){
       assert(task.status==="done","请先通过审批，再确认志愿时");
       assert(task.memberIds?.length,"请至少选择一位执行成员");
       assert(body.volunteerHours&&typeof body.volunteerHours==="object"&&!Array.isArray(body.volunteerHours),"请填写各执行成员的志愿时");
       const hours:Record<string,number>={};
-      for(const [id,value] of Object.entries(body.volunteerHours)){assert(task.memberIds.includes(id),"志愿时只能登记给执行成员");assert(typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=1000,"志愿时须为 0–1000 小时");hours[id]=Math.round(value*100)/100;}
-      assert(task.memberIds.every(id=>id in hours),"请填写每位执行成员的志愿时，无时长填写 0");task.volunteerHours=hours;task.volunteerEntered=body.volunteerEntered===true;
+      for(const [id,value] of Object.entries(body.volunteerHours)){assert(task.memberIds.includes(id),"志愿时只能登记给执行成员");assert(typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=1000,"志愿时须为 0–1000 小时");if(countable.includes(id))hours[id]=Math.round(value*100)/100;}
+      assert(countable.every(id=>id in hours),"请填写每位执行成员的志愿时，无时长填写 0");task.volunteerHours=hours;task.volunteerEntered=countable.length>0&&body.volunteerEntered===true;
     }
-    if(task.department==="运营部"&&body.status==="done"&&previousStatus!=="done"&&!("volunteerHours" in body)){
-      assert(task.volunteerHours&&task.memberIds?.length&&task.memberIds.every(id=>typeof task.volunteerHours?.[id]==="number"),"通过前请确认每位执行成员的志愿时");
+    if(publicity&&!personal&&task.status==="done"&&(previousStatus!=="done"||previousReport!==true&&body.reportToTeamSheets===true)&&!("volunteerHours" in body)){
+      assert(task.memberIds?.length,"請選擇執行成員；個人備忘可選擇僅個人紀錄");
+      assert(countable.every(id=>typeof task.volunteerHours?.[id]==="number"),"通过前请确认每位执行成员的志愿时");
     }
-    if("volunteerEntered" in body){assert(task.department==="运营部"&&task.status==="done"&&task.volunteerHours,"仅已通过并确认志愿时的任务可以标记录入");task.volunteerEntered=body.volunteerEntered===true;}
+    if(publicity&&personal)for(const w of s.workLogs.filter(w=>w.taskId===task.id)){w.volunteerHours=undefined;w.volunteerConfirmed=false;w.volunteerEntered=false;w.updatedAt=nowISO();}
+    if(publicity){
+      task.volunteerHours=personal?undefined:task.volunteerHours&&Object.fromEntries(Object.entries(task.volunteerHours).filter(([id])=>countable.includes(id)));
+      if(personal||!countable.length)task.volunteerEntered=false;
+    }
+    if("volunteerEntered" in body&&!personal&&countable.length){assert(publicity&&task.status==="done"&&task.volunteerHours,"仅已通过并确认志愿时的任务可以标记录入");task.volunteerEntered=body.volunteerEntered===true;}
     if(task.status==="done"&&!task.approvedAt)task.approvedAt=nowISO();
     if(task.status!=="done"){task.approvedAt=undefined;task.volunteerEntered=false;task.volunteerHours=undefined;}
     task.updatedAt = nowISO();
