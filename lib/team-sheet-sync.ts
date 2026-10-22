@@ -79,43 +79,26 @@ async function managedSheet(client:Client,config:TeamSheetState,kind:"task"|"hou
 function legacyEligibleTasks(s:Store){const c=s.teamSheets;return !c?[]:s.tasks.filter(t=>t.department===c.department&&!t.demo&&!t.sheetDestination&&!t.sourceRefs?.some(r=>r.startsWith("td:"))&&t.createdAt>=c.enabledAt&&t.reportToTeamSheets!==false&&Object.hasOwn(c.taskHashes,t.id));}
 function taskHash(s:Store,t:Task){return digest([t.sheetDestination,taskSyncPayload(t,s.members,s.matters.find(m=>m.id===t.matterId)?.title||t.activityName||"未分類事項")]);}
 export function eligibleTasks(s:Store){return [...legacyEligibleTasks(s),...s.tasks.filter(t=>t.department===s.teamSheets?.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo)];}
-export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>c.taskHashes[t.id]!==taskHash(s,t)).length+[...new Set([...Object.keys(c.taskHashes),...Object.keys(c.nativeLinks||{})])].filter(id=>!tasks.some(t=>t.id===id)).length;}
-async function pushLegacySheets(client:Client,config:TeamSheetState){
- const before=readStore(),tasks=legacyEligibleTasks(before),changed=tasks.filter(t=>config.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(config.taskHashes).filter(id=>!before.teamSheets?.nativeLinks?.[id]&&!tasks.some(t=>t.id===id));
- // Track a first publication before sending it. If the second document fails
- // and the task is then deleted, its partially published rows still get cleared.
- if(changed.length)await mutateStore(s=>{assert(s.teamSheets?.enabled&&s.teamSheets.taskFileId===config.taskFileId&&s.teamSheets.hoursFileId===config.hoursFileId,"同步設定已改動",409);for(const t of changed)s.teamSheets.taskHashes[t.id]??="";});
- if(!changed.length&&!removed.length)return;const taskTarget=await managedSheet(client,config,"task"),hoursTarget=await managedSheet(client,config,"hours");const affected=new Set([...changed.map(t=>t.id),...removed]);
- const writes:{file:string;sheet:SheetInfo;values:SheetCell[];expected:Map<string,(string|number)[]>;keyCol:number}[]=[];
- for(const [kind,target]of [["task",taskTarget],["hours",hoursTarget]]as const){
-  const snapshot=await readSheet(client,target.file,target.sheet),rows=sheetRows(snapshot.cells),keyCol=kind==="task"?7:9,existing=new Map<string,{row:number;values:(string|number)[]}>();let nextRow=1;
-  for(const [row,cells]of rows){if(row===0)continue;if([...cells.values()].some(v=>v!==""))nextRow=Math.max(nextRow,row+1);const key=String(cells.get(keyCol)||"");if(!key.startsWith("wb:"))continue;assert(!existing.has(key),"同步分表中出現重複工作台編號，請先核對",409);existing.set(key,{row,values:Array.from({length:13},(_,i)=>cells.get(i) as string|number??"")});}
-  const desired=new Map<string,(string|number)[]>();
-  for(const t of changed)for(const p of taskSyncPayload(t,before.members,before.matters.find(m=>m.id===t.matterId)?.title||t.activityName||"未分類事項")){
-   const status=p.status==="done"?"已通過":p.status==="review"?"審批中":"待審批";
-   const values:(string|number)[]=kind==="task"?["",p.date,p.title,p.name,"",status,p.matter,p.key,p.taskId,p.memberId,p.entered?"已錄入":"未錄入"]:["",p.name,p.title,"","",p.hours??"",p.entered?"已錄入":"未錄入",p.date,p.taskId,p.key,p.matter];
-   values.push(digest(values),p.updatedAt);desired.set(p.key,values);
+export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>t.sheetDestination&&c.taskHashes[t.id]!==taskHash(s,t)).length+[...new Set([...Object.keys(c.taskHashes),...Object.keys(c.nativeLinks||{})])].filter(id=>!tasks.some(t=>t.id===id)).length;}
+/** Legacy tabs are frozen. Only explicit removal/migration clears owned keys. */
+async function cleanupLegacySheets(client:Client,config:TeamSheetState){
+ const before=readStore(),kept=legacyEligibleTasks(before),removed=Object.keys(config.taskHashes).filter(id=>!before.teamSheets?.nativeLinks?.[id]&&!kept.some(t=>t.id===id));
+ if(!removed.length)return;
+ for(const kind of ["task","hours"]as const){
+  const target=await managedSheet(client,config,kind),snapshot=await readSheet(client,target.file,target.sheet),rows=sheetRows(snapshot.cells),keyCol=kind==="task"?7:9,cleared:string[]=[];const values:SheetCell[]=[];
+  for(const [row,cells]of rows){if(!row)continue;const key=String(cells.get(keyCol)||""),taskId=String(cells.get(8)||"");if(!key.startsWith("wb:")||!removed.includes(taskId))continue;
+   const old=Array.from({length:13},(_,i)=>cells.get(i) as string|number??"");assert(!snapshot.cells.some(c=>c.row===row&&c.formula)&&digest(old.slice(0,11))===old[11],"舊同步分表有人工改動，原值已保留；請核對後再遷移這項任務",409);
+   for(let col=0;col<13;col++)values.push(valueCell(row,col,""));cleared.push(key);
   }
-  const values:SheetCell[]=[],expected=new Map<string,(string|number)[]>();
-  for(const [key,old]of existing){const taskId=String(old.values[8]||"");if(!affected.has(taskId))continue;
-   const agreed=desired.get(key);const sameValues=agreed&&JSON.stringify(old.values.slice(0,11))===JSON.stringify(agreed.slice(0,11));
-   if(snapshot.cells.some(c=>c.row===old.row&&c.formula)||digest(old.values.slice(0,11))!==old.values[11]&&!sameValues)throw new AppError("同步分表有人工改動，已保留原值並停止覆寫；請核對後把工作台資料改為相同內容，再重新同步",409);
-   if(!desired.has(key)){for(let i=0;i<13;i++)values.push(valueCell(old.row,i,""));expected.set(key,[]);}
-  }
-  for(const [key,want]of desired){const old=existing.get(key);if(old&&JSON.stringify(old.values)===JSON.stringify(want))continue;const row=old?.row??nextRow++;assert(row<target.sheet.row_count,"同步分表的空間不足，請增加行數後重試");for(let i=0;i<13;i++)values.push(valueCell(row,i,want[i]));expected.set(key,want);}
-  writes.push({file:target.file,sheet:target.sheet,values,expected,keyCol});
+  for(let offset=0;offset<values.length;offset+=390)await client.write(target.file,target.sheet.sheet_id,values.slice(offset,offset+390));
+  if(cleared.length){const check=await readSheet(client,target.file,target.sheet);assert(!check.cells.some(c=>c.col===keyCol&&cleared.includes(String(cellValue(c)))),"舊分表清理後核對未通過，重試不會重複新增",502);}
  }
- let verifiedHours:SyncedVolunteer[]|undefined;
- for(const target of writes){if(!target.values.length)continue;const current=readStore().teamSheets;assert(current?.enabled&&current.taskFileId===config.taskFileId&&current.hoursFileId===config.hoursFileId,"同步設定已改動，已停止寫入",409);for(let offset=0;offset<target.values.length;offset+=390)await client.write(target.file,target.sheet.sheet_id,target.values.slice(offset,offset+390));
-  const verified=await readSheet(client,target.file,target.sheet),after=sheetRows(verified.cells),keys=new Map<string,(string|number)[]>();for(const cells of after.values()){const key=String(cells.get(target.keyCol)||"");if(key){assert(!keys.has(key),"核對時發現重複同步編號，請檢查分表",409);keys.set(key,Array.from({length:13},(_,i)=>cells.get(i) as string|number??""));}}
-  for(const [key,want]of target.expected)assert(want.length?JSON.stringify(keys.get(key))===JSON.stringify(want):!keys.has(key),"寫入後核對未通過，已保留待同步狀態；重試會按編號更新，不會重複新增",502);
-  if(target.keyCol===9)verifiedHours=parseVolunteer([verified],config.hoursFileId,config.department,before.members,config.academicYear,[],target.sheet.sheet_id).records;
- }
- await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");for(const t of changed)s.teamSheets.taskHashes[t.id]=taskHash(before,t);for(const id of removed)delete s.teamSheets.taskHashes[id];if(verifiedHours)s.teamSheets.volunteers=[...s.teamSheets.volunteers.filter(r=>!r.localTaskId),...verifiedHours];s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;});
+ await mutateStore(s=>{if(s.teamSheets)for(const id of removed)delete s.teamSheets.taskHashes[id];});
 }
+
 export async function pushTeamSheets(client:Client,config:TeamSheetState){
  // Finish cleanup in legacy tabs before migrating an opted-in task to original pages.
- await pushLegacySheets(client,config);
+ await cleanupLegacySheets(client,config);
  const before=readStore(),tasks=before.tasks.filter(t=>t.department===config.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo);
  const changed=tasks.filter(t=>before.teamSheets?.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(before.teamSheets?.nativeLinks||{}).filter(id=>!tasks.some(t=>t.id===id));
  for(const t of changed){await syncNativeTask(client,config,t,t.id);await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");s.teamSheets.taskHashes[t.id]=taskHash(before,t);});}
