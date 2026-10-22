@@ -3,7 +3,8 @@ import path from "node:path";
 import JSZip from "jszip";
 import { buildActivity } from "../../build";
 import { readStore, dirs } from "../../store";
-import { shortFileBase } from "../../naming";
+import { shortFileBase,materialFileName } from "../../naming";
+import {traditional} from "../../export-traditional";
 import { contentDisposition, resolveInside } from "../../files";
 import { assert } from "../../errors";
 import { toDateStr } from "../../date";
@@ -24,12 +25,13 @@ export async function exportMatter(ctx: Ctx) {
   assert(!running.has(matter.id),"此事务正在打包，请稍候",409);
   running.add(matter.id);
   try {
-    const zip=new JSZip(), top=zip.folder(`${shortFileBase(matter.title,100)||"事务"}_全部报销材料`)!;
+    const zip=new JSZip(), top=zip.folder(`${shortFileBase(traditional(matter.title),100)||"事務"}_全部報銷材料`)!;
     const catalog=[`事务：${matter.title}`,`关联报销：${activities.length} 笔`,"按实际报销人分文件夹，材料直接存放；统计统一见根目录的事务报销统计表.xlsx。",""];
     let bytesRead=0, total=0;
     const exported: ReimbActivity[]=[];
     const materials: MatterMaterialRow[]=[];
     const claimantFolders=new Map<string,string>(),usedFolders=new Set<string>();
+    const itemOffsets=new Map<string,number>();
     for (const [index,original] of activities.entries()) {
       // Recheck association before each build so a moved record cannot leak into the wrong bundle.
       const current=readStore().activities.find(a=>a.id===original.id);
@@ -41,38 +43,45 @@ export async function exportMatter(ctx: Ctx) {
       const packed=await JSZip.loadAsync(fs.readFileSync(resolveInside(dir,output.zipName)));
       const claimant=activity.submitter.trim()||"未填写";
       if(!claimantFolders.has(claimant)){
-        const base=`报销人-${shortFileBase(claimant,60)}`;let candidate=base,n=2;
+        const base=`報銷人-${shortFileBase(traditional(claimant),60)}`;let candidate=base,n=2;
         while(usedFolders.has(candidate))candidate=`${base}(${n++})`;
         claimantFolders.set(claimant,candidate);usedFolders.add(candidate);
       }
       const prefix=claimantFolders.get(claimant)!;
       const folder=top.folder(prefix)!;
-      const filePrefix=`${String(index+1).padStart(2,"0")}_${shortFileBase(activity.name,36)||"报销记录"}_`;
+      const offset=itemOffsets.get(claimant)||0,materialCounts=new Map<number,number>();
       for (const entry of Object.values(packed.files)) {
         if(entry.dir)continue;
         const relative=entry.name.split("/").slice(1).join("/");
         assert(relative&&!relative.split("/").some(p=>p===".."||p==="."),"材料包中存在非法文件名");
-        if(relative===output.xlsxName||relative==="材料清单.txt")continue;
+        if(relative===output.xlsxName||relative==="材料清單.txt")continue;
         assert(!relative.includes("/"),"单笔材料包中存在多余目录，请重新生成",422);
         const bytes=await entry.async("nodebuffer");bytesRead+=bytes.length;
         assert(bytesRead<=128*1024*1024,"材料转换后超过整包处理上限，请分别导出报销记录",413);
-        const name=`${filePrefix}${relative}`;
-        folder.file(name,bytes);
         const material=output.manifest.find(m=>m.name===relative);
+        assert(material,"材料清单与压缩包不一致，请重新生成",422);
+        const sourceFile=activity.files.find(f=>f.id===material.fileId);
+        const itemIndex=activity.items.findIndex(i=>i.id===sourceFile?.itemId);
+        const localItem=material.kind==="合并件"?0:itemIndex>=0?itemIndex:activity.items.length;
+        const materialIndex=(materialCounts.get(localItem)||0)+1;materialCounts.set(localItem,materialIndex);
+        const item=activity.items[localItem];
+        const name=materialFileName({seq:`${offset+localItem+1}-${materialIndex}`,item:material.kind==="合并件"?activity.name:item?.name||"未归类",amount:material.kind==="合并件"?output.totalAmount:item?.amount??null,kind:material.kind,extension:relative.toLowerCase().endsWith(".txt")?".txt":".pdf"});
+        folder.file(name,bytes);
         const source=material?.originalName||(material?.kind==="合并件"?"由报销材料生成":"");
         materials.push({claimant,activity:activity.name,kind:material?.kind||"其他",path:`${prefix}/${name}`,originalName:source});
       }
+      itemOffsets.set(claimant,offset+activity.items.length+(activity.files.some(f=>!activity.items.some(i=>i.id===f.itemId))?1:0));
       total+=output.totalAmount;
       catalog.push(`${index+1}. 报销人：${claimant}；经办人：${activity.handler||"未填写"}；报销：${activity.name}；金额：¥${output.totalAmount.toFixed(2)}`,`   文件夹：${prefix}`,...output.warnings.map(w=>`   待核对：${w}`),"");
     }
     const latest=readStore().activities.filter(a=>a.matterId===matter.id);
     assert(latest.length===exported.length&&latest.every(a=>exported.some(old=>old.id===a.id&&old.updatedAt===a.updatedAt&&a.department===matter.department)),"事务的关联报销已变化，请重新生成",409);
     catalog.push(`合计：¥${total.toFixed(2)}`,`生成时间：${new Date().toISOString()}`);
-    top.file("事务报销清单.txt",catalog.join("\r\n"));
-    top.file("事务报销统计表.xlsx",await buildMatterReimbursementWorkbook(matter,exported,materials));
+    top.file("事務報銷清單.txt",catalog.map(traditional).join("\r\n"));
+    top.file("事務報銷統計表.xlsx",await buildMatterReimbursementWorkbook(matter,exported,materials));
     const claimants=[...new Set(exported.map(a=>a.submitter.trim()||"未填写"))], joined=claimants.join("、");
-    const label=shortFileBase(joined,60)+(new TextEncoder().encode(joined).length>60?`等${claimants.length}人`:"");
-    const name=`${shortFileBase(matter.title,80)}_报销人-${label}_全部报销材料_${toDateStr(new Date()).replace(/-/g,"")}.zip`;
+    const label=shortFileBase(traditional(joined),60)+(new TextEncoder().encode(traditional(joined)).length>60?`等${claimants.length}人`:"");
+    const name=`${shortFileBase(traditional(matter.title),80)}_報銷人-${label}_全部報銷材料_${toDateStr(new Date()).replace(/-/g,"")}.zip`;
     const bytes=await zip.generateAsync({type:"uint8array",compression:"DEFLATE",compressionOptions:{level:6}});
     return new Response(new Uint8Array(bytes),{headers:{"content-type":"application/zip","content-disposition":contentDisposition(name),"cache-control":"no-store","x-workbench-activity-count":String(activities.length)}});
   } finally { running.delete(matter.id); }

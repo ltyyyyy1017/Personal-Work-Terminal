@@ -31,7 +31,8 @@
     "swr": "^2.3.6",
     "tesseract.js": "^7.0.0",
     "tsdav": "^2.5.0",
-    "unpdf": "^1.9.1"
+    "unpdf": "^1.9.1",
+    "opencc-js": "1.4.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",

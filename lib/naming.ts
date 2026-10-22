@@ -1,5 +1,6 @@
 import { DEFAULT_NAMING, KIND_ORDER } from "./constants";
 import type { ReimbActivity, ReimbFile, ReimbItem } from "./types";
+import {traditional} from "./export-traditional";
 
 /** 128 / 128.5 / 1280.05，去掉多余小数位 */
 export function formatAmount(n: number | null | undefined): string {
@@ -40,7 +41,7 @@ export function materialFileName(opts: {
     .replace(/\{amount\}/g, formatAmount(opts.amount))
     .replace(/\{kind\}/g, opts.kind)
     .replace(/\{date\}/g, "");
-  const safeBase = shortFileBase(base, 180);
+  const safeBase = shortFileBase(traditional(base), 180);
   const label = opts.kind === "同行人" && !safeBase.includes("同行人") ? `${safeBase}-同行人` : safeBase;
   return `${label}${opts.extension || ".pdf"}`;
 }
@@ -56,7 +57,7 @@ export function shortFileBase(name: string, maxBytes: number): string {
 }
 
 export function reimbursementPackageBase(activity: Pick<ReimbActivity, "name" | "submitter">): string {
-  return `报销人-${shortFileBase(activity.submitter, 60) || "未填写"}_${shortFileBase(activity.name, 100) || "未命名"}_报销材料`;
+  return traditional(`报销人-${shortFileBase(traditional(activity.submitter), 60) || "未填写"}_${shortFileBase(traditional(activity.name), 100) || "未命名"}_报销材料`);
 }
 
 export function kindRank(kind: string): number {
