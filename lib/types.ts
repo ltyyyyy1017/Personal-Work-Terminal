@@ -123,6 +123,8 @@ export interface CalEvent {
 }
 
 export interface Task {
+  reviewerMemberIds?:string[];
+  reviewedAt?:string;
   sourceBaseline?: import("./source-task").SourceTaskFields;
   sourceResponsibleMemberIds?: string[];
   sourceResponsibleNames?: string[];
@@ -359,6 +361,9 @@ export interface SyncedVolunteer {
  sheetId?:string;row?:number;hours:number|null;workHours:number|null;entered:boolean;detail:string;sourceRefs:string[];localTaskId?:string;localVersion?:string;
 }
 export interface TeamSheetState {
+ recordOwnerWork?:boolean;
+ ownerDestinations?:Record<string,NonNullable<Task["sheetDestination"]>>;
+ ownerPublicationSources?:Record<string,string[]>;
  nativeLinks?:Record<string,NativeSheetLink[]>;
  enabled:boolean;department:string;taskFileId:string;hoursFileId:string;academicYear:number;enabledAt:string;
  taskSheetId?:string;hoursSheetId?:string;lastPullAt?:string;lastPushAt?:string;lastError?:string;lastErrorAt?:string;

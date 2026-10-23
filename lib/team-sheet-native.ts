@@ -1,6 +1,6 @@
 import {readStore,mutateStore} from "./store";
 import {assert} from "./errors";
-import {cellValue,sheetRows,normalized,taskSyncPayload,digest} from "./team-sheet-data";
+import {cellValue,sheetRows,normalized,taskSyncPayload,digest,sheetDate,hoursValue} from "./team-sheet-data";
 import type {tencentClient,SheetInfo,SheetCell} from "./tencent-docs";
 import type {Task,TeamSheetState,NativeSheetLink} from "./types";
 type Client=Awaited<ReturnType<typeof tencentClient>>;
@@ -15,7 +15,8 @@ export async function nativeSnapshot(client:Client,file:string,id:string){
 function locate(link:NativeSheetLink,cells:SheetCell[]){
  const previous=link.previous||link.before;
  for(const pattern of [link.after,previous])if(pattern.some(c=>c.value!=="")){
-  const found=[...new Set(cells.map(c=>c.row))].filter(row=>same(cells,row,pattern));
+  let found=[...new Set(cells.map(c=>c.row))].filter(row=>same(cells,row,pattern));
+  if(link.kind==="hours"&&!link.owned){const s=readStore(),name=s.members.find(m=>m.id===link.memberId)?.name;found=found.filter(row=>name&&normalized(String(value(cells,row,1)))===normalized(name)||s.teamSheets?.volunteers.some(r=>r.sheetId===link.sheet&&r.row===row&&r.memberId===link.memberId));}
   assert(found.length<=1,"目標表出現重複記錄，請先核對",409);if(found.length===1)return found[0];
  }
  assert(same(cells,link.row,previous)||same(cells,link.row,link.after),"原表記錄已被人工修改或移動，已停止覆寫，請先核對",409);return link.row;
@@ -45,7 +46,7 @@ async function reserveRow(client:Client,file:string,sheetId:string,kind:"task"|"
   }
   start=section[0]+1;end=headers.find(([r])=>r>section[0])?.[0]??snap.sheet.row_count;
  }else{
-  assert(String(rows.get(0)?.get(1)||"")==="姓名"&&/部门|部門|任务|任務/.test(String(rows.get(0)?.get(2)||"")),"請選擇含姓名、部門及線上／線下時長的原有志願時頁籤",409);
+  assert(String(rows.get(0)?.get(1)||"")==="姓名"&&(/部门|部門|任务|任務/.test(String(rows.get(0)?.get(2)||""))||/线上|線上/.test(String(rows.get(0)?.get(3)||""))&&/线下|線下/.test(String(rows.get(0)?.get(4)||""))),"請選擇含姓名、部門或工作內容及線上／線下時長的原有志願時頁籤",409);
   start=Math.max(1,...snap.cells.filter(c=>c.col<=6&&String(cellValue(c)).trim()!=="").map(c=>c.row+1));
  }
  const blocked=mergedRows((await client.merges(file,sheetId)).merged_cells||[],columns);
@@ -69,23 +70,27 @@ export async function syncNativeTask(client:Client,config:TeamSheetState,task:Ta
   const cols=kind==="task"?[1,2,3,5]:[1,2,3,4,5,6];
   if(!link){
    const snap=await nativeSnapshot(client,file,sheet),origin=task?.sheetOrigin?.[kind];let row:number,owned=true;
-   if(origin?.sheetId===sheet&&(kind!=="task"||task?.memberIds?.length===1||"rows" in origin&&origin.rows?.[p.memberId]!==undefined)){row=(kind==="task"&&"rows" in origin?origin.rows?.[p.memberId]:undefined)??origin.row;const expectedName=kind==="task"?3:1;assert(normalized(String(value(snap.cells,row,expectedName)))===normalized(p.name),"來源表的姓名或行號已變動，請先重新讀取表格",409);owned=false;}
+   if(origin?.sheetId===sheet&&(kind!=="task"||task?.memberIds?.length===1||"rows" in origin&&origin.rows?.[p.memberId]!==undefined)){row=(kind==="task"&&"rows" in origin?origin.rows?.[p.memberId]:undefined)??origin.row;const expectedName=kind==="task"?3:1,rawName=String(value(snap.cells,row,expectedName));const record=kind==="hours"?readStore().teamSheets?.volunteers.find(r=>r.sheetId===sheet&&r.row===row&&r.memberId===p.memberId):undefined,carriedName=kind==="hours"&&!rawName&&Boolean(record);assert(normalized(rawName)===normalized(p.name)||carriedName,"來源表的姓名或行號已變動，請先重新讀取表格",409);
+    if(task?.id.startsWith("owner:")){
+     if(kind==="task"){assert(normalized(String(value(snap.cells,row,2)))===normalized(task.sourceBaseline?.title||p.title),"來源任務在讀取後被修改，已停止覆寫，稍後重新同步",409);const expected=task.sourceBaseline?.workDate;if(expected)assert(sheetDate(String(value(snap.cells,row,1)),config.academicYear)===expected,"來源日期在讀取後被修改，已停止覆寫",409);}
+     else if(record){const departmentColumn=/部门|部門/.test(String(value(snap.cells,0,2))),detail=departmentColumn?[3,4].map(col=>String(value(snap.cells,row,col)).trim()).filter(Boolean).join("；"):String(value(snap.cells,row,2)).trim();assert(detail===record.detail,"來源工作內容在讀取後被修改，已停止覆寫",409);const on=hoursValue(value(snap.cells,row,3)),off=hoursValue(value(snap.cells,row,4)),hours=hoursValue(value(snap.cells,row,5))??(on===null&&off===null?null:Math.round(((on||0)+(off||0))*100)/100);assert(hours===record.hours,"來源時長在讀取後被修改，已停止覆寫",409);}
+    }owned=false;}
    else{
     // A task already present in the selected assignment page is adopted, not duplicated.
     const matches=kind==="task"?[...sheetRows(snap.cells)].filter(([,r])=>normalized(String(r.get(2)||""))===normalized(p.title)&&normalized(String(r.get(3)||""))===normalized(p.name)):[];
     assert(matches.length<=1,"原表已有多筆相同任務，請先核對",409);
     if(matches.length){row=matches[0][0];owned=false;}else row=await reserveRow(client,file,sheet,kind,config.department);
    }
-   const current=await nativeSnapshot(client,file,sheet);link={file,sheet,kind,memberId:p.memberId,row,owned,before:cols.map(col=>({col,value:value(current.cells,row,col) as string|number})),after:[]};links.push(link);
+   const current=await nativeSnapshot(client,file,sheet);const editable=cols.filter(col=>!(kind==="hours"&&!owned&&[1,2].includes(col)&&value(current.cells,row,col)===""));link={file,sheet,kind,memberId:p.memberId,row,owned,before:editable.map(col=>({col,value:value(current.cells,row,col) as string|number})),after:[]};links.push(link);
   }
   let after:Values;
-  if(kind==="task")after=[{col:1,value:p.date},{col:2,value:[p.title,p.description].filter(Boolean).join("\n")},{col:3,value:p.name},{col:5,value:p.status==="done"?"已完成":p.status==="review"?"審核中":"待完成"}];
+  if(kind==="task"){const originalDate=link.before.find(c=>c.col===1)?.value||"",date=!link.owned&&(!p.date||sheetDate(String(originalDate),config.academicYear)===p.date)?originalDate:p.date;after=[{col:1,value:date},{col:2,value:[p.title,p.description].filter(Boolean).join("\n")},{col:3,value:p.name},{col:5,value:p.status==="done"?"已完成":p.status==="review"?"審核中":"待完成"}];}
   else{
    const source=task?.sheetOrigin?.hours?.sheetId===sheet&&!link.owned;
    const header=await client.read(file,sheet,0,6),departmentColumn=/部门|部門/.test(String(value(header.cells,0,2)));
-   const sourceDetail=(col:number)=>{const raw=String(link!.before.find(c=>c.col===col)?.value||"");return p.hours===null?raw.replace(/\d+(?:\.\d+)?\s*(?:h|小时|小時)/gi,""):raw;};
+   const sourceDetail=(col:number)=>{const raw=String(link!.before.find(c=>c.col===col)?.value||"");return p.hours===null?/^\s*\d+(?:\.\d+)?\s*$/.test(raw)?"":raw.replace(/\d+(?:\.\d+)?\s*(?:h|小时|小時)/gi,""):raw;};
    const detail=p.hours===null?p.title:`${p.title} ${p.hours}h`,online=dest!.hoursKind==="online";
-   after=[{col:1,value:p.name},{col:2,value:departmentColumn?config.department:p.title},{col:3,value:source?sourceDetail(3):online?detail:""},{col:4,value:source?sourceDetail(4):online?"":detail},{col:5,value:p.hours??""},{col:6,value:p.entered?"已錄入":"未錄入"}];
+   after=[{col:1,value:p.name},{col:2,value:departmentColumn?config.department:p.title},{col:3,value:source?sourceDetail(3):online?detail:""},{col:4,value:source?sourceDetail(4):online?"":detail},{col:5,value:p.hours??""},{col:6,value:p.hours===null?"":p.entered?"已錄入":"未錄入"}].filter(c=>link!.owned||link!.before.some(b=>b.col===c.col));
   }
   // Journal before the request: a lost response resumes at the same row.
   if(JSON.stringify(link.after)!==JSON.stringify(after)){link.previous=link.after.length?link.after:link.before;link.after=after;}

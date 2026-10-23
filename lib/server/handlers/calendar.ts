@@ -10,6 +10,8 @@ import { parseLocal } from "../../date";
 import type { Ctx } from "../ctx";
 import { memberIds } from "./workspace";
 import {organizationFor,departmentProfiles} from "../../organizations";
+import {publicityOwner} from "../../owner-work";
+import {requiresMyReview} from "../../task-followup";
 
 const TAGS = ["行政部", "运营部", "个人", "会议", "截止", "差旅", "活动"];
 
@@ -168,7 +170,7 @@ export async function createTask(ctx: Ctx) {
 export async function patchTask(ctx: Ctx) {
   const body = (await ctx.body()) as Record<string, unknown>;
   let destination:Task["sheetDestination"];
-  if(body.reportToTeamSheets===true&&readStore().teamSheets?.enabled){
+  if((body.reportToTeamSheets===true||body.sheetDestination&&body.reviewedByOwner===true&&readStore().teamSheets?.recordOwnerWork)&&readStore().teamSheets?.enabled){
     const c=readStore().teamSheets!;
     const raw=body.sheetDestination as Record<string,unknown>|undefined;assert(raw&&typeof raw==="object","請選擇任務表與志願時表的原有頁籤");
     const taskSheetId=str(raw.taskSheetId,"",100),hoursSheetId=str(raw.hoursSheetId,"",100);assert(taskSheetId&&hoursSheetId&&(raw.hoursKind==="online"||raw.hoursKind==="offline"),"請選擇完整的原表位置");
@@ -226,6 +228,8 @@ export async function patchTask(ctx: Ctx) {
       if(personal||!countable.length)task.volunteerEntered=false;
     }
     if("volunteerEntered" in body&&!personal&&countable.length){assert(publicity&&task.status==="done"&&task.volunteerHours,"仅已通过并确认志愿时的任务可以标记录入");task.volunteerEntered=body.volunteerEntered===true;}
+    if(task.status==="done"&&task.department==="运营部"&&(body.reviewedByOwner===true||previousStatus!=="done"&&requiresMyReview(task))){const owner=publicityOwner(s);if(owner){task.reviewerMemberIds=[...new Set([...(task.reviewerMemberIds||[]),owner.id])];task.reviewedAt=nowISO();}}
+    if(task.sheetDestination&&task.status==="done"&&task.department==="运营部"&&s.teamSheets?.recordOwnerWork&&publicityOwner(s)){s.teamSheets.ownerDestinations??={};if(task.matterId)s.teamSheets.ownerDestinations[task.matterId]=task.sheetDestination;}
     if(task.status==="done"&&!task.approvedAt)task.approvedAt=nowISO();
     if(task.status!=="done"){task.approvedAt=undefined;task.volunteerEntered=false;task.volunteerHours=undefined;}
     task.updatedAt = nowISO();
