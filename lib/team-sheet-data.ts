@@ -2,8 +2,9 @@ import crypto from "node:crypto";
 import type {SheetInfo,SheetCell} from "./tencent-docs";
 import type {Member,Task,SyncedVolunteer} from "./types";
 import {isVolunteerLeader} from "./task-reporting";
+import {Converter} from "opencc-js/cn2t";
 export interface SheetSnapshot {sheet:SheetInfo;cells:SheetCell[]}
-export interface ImportedAssignment {key:string;matter:string;title:string;date:string;phase:string;names:string[];memberIds:string[];done:boolean;refs:string[];sheetId?:string;rows?:Record<string,number>}
+export interface ImportedAssignment {key:string;matter:string;title:string;date:string;phase:string;names:string[];memberIds:string[];done:boolean;refs:string[];sheetId?:string;rows?:Record<string,number>;sourceRows?:Record<string,number>}
 export const digest=(v:unknown)=>crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex").slice(0,24);
 export const normalized=(v:string)=>v.normalize("NFKC").replace(/\s+/g,"").toLocaleLowerCase();
 export function cellValue(c:SheetCell):string|number|boolean{return c.value_type==="NUMBER"?c.number_value??0:c.value_type==="BOOL"?c.bool_value??false:c.string_value||"";}
@@ -21,7 +22,9 @@ export function hoursValue(value:unknown):number|null{
  if(/^\d+(?:\.\d+)?\s*(?:h|小时|小時|時|时)?$/i.test(text))return hoursValue(Number(text.match(/\d+(?:\.\d+)?/)![0]));
  const clean=text.replace(/[（(][^）)]*[）)]/g,"");const matches=[...clean.matchAll(/(\d+(?:\.\d+)?)\s*(?:h|小时|小時)/gi)];if(!matches.length)return null;return hoursValue(matches.reduce((s,m)=>s+Number(m[1]),0));
 }
-function roster(members:Member[],department:string){const groups=new Map<string,Member[]>();for(const m of members.filter(m=>m.department===department)){const key=normalized(m.name);groups.set(key,[...(groups.get(key)||[]),m]);}return(name:string)=>{const found=groups.get(normalized(name));return found?.length===1?found[0].id:undefined;};}
+const traditional=Converter({from:"cn",to:"hk"});
+const rosterName=(name:string)=>normalized(traditional(name)).replace(/恆/g,"恒");
+function roster(members:Member[],department:string){const groups=new Map<string,Member[]>();for(const m of members.filter(m=>m.department===department)){const key=rosterName(m.name);groups.set(key,[...(groups.get(key)||[]),m]);}return(name:string)=>{const found=groups.get(rosterName(name));return found?.length===1?found[0].id:undefined;};}
 export function parseAssignments(snapshots:SheetSnapshot[],file:string,department:string,members:Member[],year:number,managedId?:string){
  const match=roster(members,department),groups=new Map<string,ImportedAssignment>();
  for(const {sheet,cells}of snapshots){if(sheet.sheet_id===managedId||/基准模板|基準模板/.test(sheet.sheet_name))continue;
@@ -30,12 +33,14 @@ export function parseAssignments(snapshots:SheetSnapshot[],file:string,departmen
   for(const [index,row]of [...rows].sort((a,b)=>a[0]-b[0])){
    const label=rowText(row,0);if(/部[（(]|主席团|主席團|统筹[（(]|統籌[（(]/.test(label)){active=normalized(label).includes(normalized(department));phase="";continue;}
    if(!active)continue;const title=rowText(row,2),name=rowText(row,3);if(!title||!name||/^(姓名|xxx|张[一二三四]|張[一二三四])$/.test(name)||/任务|任務/.test(title)&&name==="姓名")continue;
-   const rawDate=rowText(row,1);if(rawDate)phase=rawDate;const date=sheetDate(rawDate,year),names=name.split(/[、,，\n/]+/).map(s=>s.trim()).filter(Boolean),ids=names.map(match).filter((id):id is string=>!!id);
-   const identity=digest([sheet.sheet_id,normalized(title),names.map(normalized).sort(),date,rawDate]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
+   const rawDate=rowText(row,1);if(rawDate)phase=rawDate;const date=sheetDate(rawDate,year),rawNames=name.split(/[、,，;；\n/]+/).map(s=>s.trim()).filter(Boolean),ids=[...new Set(rawNames.map(match).filter((id):id is string=>!!id))];
+   if(!ids.length)continue;
+   const names=ids.map(id=>members.find(m=>m.id===id)!.name);
+   const identity=digest([sheet.sheet_id,normalized(title),rawNames.map(normalized).sort(),date,rawDate]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
    const ref=`td:task:${file}:${sheet.sheet_id}:${identity}:${occurrence}`,groupKey=digest([sheet.sheet_id,normalized(title),date,rawDate||phase]);
    const existing=groups.get(groupKey),done=/^(已完成|完成|通过|通過)$/.test(rowText(row,5));
-   if(existing){existing.names=[...new Set([...existing.names,...names])];existing.memberIds=[...new Set([...existing.memberIds,...ids])];existing.done=existing.done&&done;existing.refs.push(ref);if(names.length===1&&ids.length===1)(existing.rows??={})[ids[0]]=index;}
-   else groups.set(groupKey,{key:`td:assignment:${file}:${groupKey}`,matter:sheet.sheet_name,title,date,phase,names,memberIds:ids,done,refs:[ref],sheetId:sheet.sheet_id,rows:names.length===1&&ids.length===1?{[ids[0]]:index}:{}});
+   if(existing){existing.names=[...new Set([...existing.names,...names])];existing.memberIds=[...new Set([...existing.memberIds,...ids])];existing.done=existing.done&&done;existing.refs.push(ref);for(const id of ids)(existing.sourceRows??={})[id]=index;if(rawNames.length===1&&ids.length===1)(existing.rows??={})[ids[0]]=index;}
+   else groups.set(groupKey,{key:`td:assignment:${file}:${groupKey}`,matter:sheet.sheet_name,title,date,phase,names,memberIds:ids,done,refs:[ref],sheetId:sheet.sheet_id,sourceRows:Object.fromEntries(ids.map(id=>[id,index])),rows:rawNames.length===1&&ids.length===1?{[ids[0]]:index}:{}});
   }
  }
  return [...groups.values()];
@@ -48,7 +53,8 @@ export function parseVolunteer(snapshots:SheetSnapshot[],file:string,department:
    const label=rowText(row,0);if(/填写规则|填寫規則|^例[：:]|使用说明|使用說明/.test(label)){name="";dept="";continue;}
    if(rowText(row,1))name=rowText(row,1);if(withDepartment&&rowText(row,2))dept=rowText(row,2);
    if(!name||/^(xxx|姓名|张[一二三四]|張[一二三四])$/.test(name)||withDepartment&&normalized(dept)!==normalized(department))continue;
-   const memberId=match(name);const title=withDepartment?sheet.sheet_name:rowText(row,2),online=row.get(3),offline=row.get(4),total=hoursValue(row.get(5)),detail=withDepartment?[rowText(row,3),rowText(row,4)].filter(Boolean).join("；"):rowText(row,2);
+   const memberId=match(name);if(!memberId)continue;
+   const title=withDepartment?sheet.sheet_name:rowText(row,2),online=row.get(3),offline=row.get(4),total=hoursValue(row.get(5)),detail=withDepartment?[rowText(row,3),rowText(row,4)].filter(Boolean).join("；"):rowText(row,2);
    if(!title&&!detail&&total===null)continue;const titleValue=title||sheet.sheet_name;
    const on=hoursValue(online),off=hoursValue(offline),workHours=on===null&&off===null?null:Math.round(((on||0)+(off||0))*100)/100,hours=total??workHours;
    if(hours===null&&!detail)continue;

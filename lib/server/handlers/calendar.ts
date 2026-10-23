@@ -119,7 +119,7 @@ export async function deleteEvent(ctx: Ctx) {
 
 export async function listTasks() {
   const store = readStore();
-  const tasks = [...store.tasks].sort((a, b) => {
+  const tasks = store.tasks.filter(t=>!t.sourceMissing).sort((a, b) => {
     if (a.status !== b.status) return a.status === "done" ? 1 : b.status === "done" ? -1 : 0;
     return (a.due ?? "9999").localeCompare(b.due ?? "9999");
   });

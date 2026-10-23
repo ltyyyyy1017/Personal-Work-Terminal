@@ -19,11 +19,12 @@ export function parseKdocsSheet(sheet:KdocsSheet,cells:KdocsCell[],mapping:Kdocs
  const issues:string[]=[],records:KdocsRecord[]=[],seen=new Map<string,number>();
  for(const [row,cols]of [...kdocsRows(cells)].sort((a,b)=>a[0]-b[0])){
   if(row<=mapping.headerRow)continue;const text=(col:number|undefined)=>col===undefined?"":cols.get(col)||"",title=text(mapping.titleColumn),name=text(mapping.memberColumn);
-  if(!title&&!name)continue;if(!title||!name){issues.push(`${sheet.sheetName} 第 ${row+1} 行：缺少工作事項或姓名，保留原表待核對。`);continue;}
+  if(!title&&!name)continue;if(!title){issues.push(`${sheet.sheetName} 第 ${row+1} 行：缺少工作事項，保留原表待核對。`);continue;}
   if(/^(合计|合計|总计|總計|示例|範例|填写说明|填寫說明)/.test(title)||/^(姓名|xxx|示例|範例)$/.test(name))continue;
   const names=[...new Set(name.split(/[、,，;；\n/]+/).map(s=>s.trim()).filter(Boolean))],ids:string[]=[];
-  for(const n of names){const matches=members.filter(m=>m.department==="行政部"&&kdocsNormalize(m.name)===kdocsNormalize(n));if(matches.length===1)ids.push(matches[0].id);else issues.push(`${sheet.sheetName}：「${n}」未對應唯一行政部成員，來源姓名及工作保留，暫不計績效。`);}
+  for(const n of names){const matches=members.filter(m=>m.department==="行政部"&&kdocsNormalize(m.name)===kdocsNormalize(n));if(matches.length===1)ids.push(matches[0].id);}
   const responsibleNames=[...new Set(text(mapping.responsibleColumn).split(/[、,，;；\n/]+/).map(s=>s.trim()).filter(Boolean))],responsibleMemberIds=responsibleNames.flatMap(n=>{const found=members.filter(m=>m.department==="行政部"&&kdocsNormalize(m.name)===kdocsNormalize(n));return found.length===1?[found[0].id]:[];});
+  if(!ids.length&&!responsibleMemberIds.length)continue;
   const rawDate=text(mapping.dateColumn),date=sheetDate(rawDate,year);if(!date)issues.push(`${sheet.sheetName} 第 ${row+1} 行：缺少明確日期，保留工作記錄，不補成今天，也不自動計次。`);
   const ruleText=text(mapping.ruleColumn);let rule=mapping.rule as keyof typeof PERFORMANCE_RULES|undefined;
   if(ruleText){rule=(Object.keys(PERFORMANCE_RULES) as (keyof typeof PERFORMANCE_RULES)[]).find(k=>kdocsNormalize(PERFORMANCE_RULES[k].name)===kdocsNormalize(ruleText)||k===ruleText);}
@@ -32,7 +33,7 @@ export function parseKdocsSheet(sheet:KdocsSheet,cells:KdocsCell[],mapping:Kdocs
   const matter=text(mapping.activityColumn)||sheet.sheetName,identity=digest([sheet.sheetId,kdocsNormalize(title),names.map(kdocsNormalize).sort(),date||rawDate]),occurrence=seen.get(identity)||0;seen.set(identity,occurrence+1);
   const projectRaw=cells.find(c=>c.rowFrom===row&&c.colFrom===mapping.activityColumn)?.originalCellValue as {value?:{id:string}[]}|undefined;const projectId=Array.isArray(projectRaw?.value)&&projectRaw.value.length===1?projectRaw.value[0].id:undefined;
   const recordId=cells.find(c=>c.rowFrom===row&&c.recordId)?.recordId,rawScore=text(mapping.scoreColumn),score=rawScore!==""&&Number.isFinite(Number(rawScore))?Number(rawScore):undefined;
-  records.push({key:recordId?`kd:record:${sheet.sheetId}:id:${recordId}`:`kd:record:${sheet.sheetId}:${identity}:${occurrence}`,recordId,projectId,responsibleNames,responsibleMemberIds,fingerprint:digest(cells.filter(c=>c.rowFrom===row).map(c=>[c.colFrom,kdocsText(c)]).sort((a,b)=>Number(a[0])-Number(b[0]))),taskStatus,sourceStatus:statusText,score,sourceCategory:text(mapping.categoryColumn),sheetId:sheet.sheetId,sheetName:sheet.sheetName,row,title,matter,date,names,memberIds:ids,status,note:text(mapping.detailColumn)&&text(mapping.noteColumn)&&text(mapping.detailColumn).includes(text(mapping.noteColumn))?text(mapping.detailColumn):[text(mapping.detailColumn),text(mapping.noteColumn)].filter(Boolean).join("\n"),rule,phase:rule==="materials"?mapping.phase:undefined});
+  records.push({key:recordId?`kd:record:${sheet.sheetId}:id:${recordId}`:`kd:record:${sheet.sheetId}:${identity}:${occurrence}`,recordId,projectId,responsibleNames:responsibleMemberIds.map(id=>members.find(m=>m.id===id)!.name),responsibleMemberIds,fingerprint:digest(cells.filter(c=>c.rowFrom===row).map(c=>[c.colFrom,kdocsText(c)]).sort((a,b)=>Number(a[0])-Number(b[0]))),taskStatus,sourceStatus:statusText,score,sourceCategory:text(mapping.categoryColumn),sheetId:sheet.sheetId,sheetName:sheet.sheetName,row,title,matter,date,names:ids.map(id=>members.find(m=>m.id===id)!.name),memberIds:ids,status,note:text(mapping.detailColumn)&&text(mapping.noteColumn)&&text(mapping.detailColumn).includes(text(mapping.noteColumn))?text(mapping.detailColumn):[text(mapping.detailColumn),text(mapping.noteColumn)].filter(Boolean).join("\n"),rule,phase:rule==="materials"?mapping.phase:undefined});
  }
  return{records,issues:[...new Set(issues)]};
 }

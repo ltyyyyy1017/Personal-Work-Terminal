@@ -123,13 +123,14 @@ export interface CalEvent {
 }
 
 export interface Task {
+  sourceBaseline?: import("./source-task").SourceTaskFields;
   sourceResponsibleMemberIds?: string[];
   sourceResponsibleNames?: string[];
   kdocsReporting?: {include:boolean;sheetId?:number;projectId?:string};
   kdocsOrigin?: {sheetId:number;row:number;recordId?:string;fingerprint?:string;projectId?:string};
   sourceRecorded?: boolean;
   sheetDestination?: {taskSheetId:string;hoursSheetId:string;hoursKind:"online"|"offline"};
-  sheetOrigin?: {task?:{sheetId:string;row:number;rows?:Record<string,number>};hours?:{sheetId:string;row:number}};
+  sheetOrigin?: {task?:{sheetId:string;row:number;rows?:Record<string,number>;sourceRows?:Record<string,number>};hours?:{sheetId:string;row:number}};
   sourceHours?: Record<string,number>;
   /** Undefined: ask on completion; false: private record without volunteer hours. */
   reportToTeamSheets?: boolean;
