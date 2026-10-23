@@ -51,7 +51,7 @@ export function bootstrap() {
       : { connected: Boolean(getGithubToken()) },
     counts: {
       events: store.events.length,
-      tasks: store.tasks.filter((t) => t.status !== "done").length,
+      tasks: store.tasks.filter((t) => !t.sourceMissing&&t.status !== "done").length,
       activities: store.activities.length,
       projects: store.projects.length,
       docs: store.docs.length,

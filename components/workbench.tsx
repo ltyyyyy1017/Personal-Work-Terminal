@@ -84,6 +84,7 @@ export default function Workbench() {
     setData(await api("state"));setLogin(false);setError("");
   },[]);
   useEffect(()=>{void load().catch(e=>setError(e.message));const timer=setInterval(()=>setToday(todayStr()),60000);return()=>clearInterval(timer);},[load]);
+  useEffect(()=>{if(!data||login)return;const timer=setInterval(()=>{if(document.visibilityState==="visible"&&!modal&&!approval&&!internalApproval&&!intakeOpen)void load().catch(()=>{});},30_000);return()=>clearInterval(timer);},[Boolean(data),login,modal,approval,internalApproval,intakeOpen,load]);
   useEffect(()=>{const view=new URLSearchParams(location.search).get("view");if(nav.some(n=>n.id===view)||view==="settings")setPage(view==="volunteer"?"worklogs":view as Page);const d=new URLSearchParams(location.search).get("department");if(d)setDept(d);else if(["devices","resources","worklogs","volunteer"].includes(view||""))setDept("运营部");else if(view==="performance")setDept("行政部");else if(view==="library")setDept("个人");},[]);
   useEffect(()=>{if(!selectedActivity){setDetail(null);return;}void api(`activities/${selectedActivity}`).then(setDetail).catch(e=>setError(e.message));},[selectedActivity,data]);
   const act=async(fn:()=>Promise<unknown>,message="已保存")=>{setBusy(true);setError("");try {await fn();await load();if(message)notify(message);}catch(e){setError((e as Error).message);}finally{setBusy(false);}};

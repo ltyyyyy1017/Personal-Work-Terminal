@@ -7,6 +7,7 @@ import {assert,AppError} from "./errors";
 import {tencentClient,tencentConnected,type SheetCell,type SheetInfo} from "./tencent-docs";
 import {parseAssignments,parseVolunteer,digest,sheetRows,cellValue,normalized,taskSyncPayload,type SheetSnapshot} from "./team-sheet-data";
 import type {TeamSheetState,Task,Store,SyncedVolunteer} from "./types";
+import {mergeSourceTask,scopeSourceParticipants,sourceConflictLabels} from "./source-task";
 
 const taskHeader=["序號","時間","任務","姓名","聯繫方式","完成情況","事項","工作台編號","任務ID","成員ID","志願時錄入","同步校驗","更新時間"];
 const hoursHeader=["序號","姓名","任務","線上出工時長","線下出工時長","匯總志願時長/h","錄入情況","日期","任務ID","工作台編號","事項","同步校驗","更新時間"];
@@ -36,12 +37,14 @@ export async function pullTeamSheets(client:Client,config:TeamSheetState){
   assert(s.teamSheets?.taskFileId===config.taskFileId&&s.teamSheets.hoursFileId===config.hoursFileId,"同步設定已改動，請重試",409);
   for(const [taskId,links]of Object.entries(s.teamSheets.nativeLinks||{}))for(const link of links){const row=locations.get(`${taskId}:${link.kind}:${link.memberId}:${link.sheet}`);if(row!==undefined)link.row=row;}
   const assignmentKey=(a:typeof assignments[number])=>{
-   const prior=s.tasks.find(t=>t.sheetOrigin?.task?.sheetId===a.sheetId&&t.sourceRefs?.some(r=>r.startsWith("td:assignment:"))&&a.memberIds.some(id=>t.memberIds?.includes(id)&&((t.sheetOrigin!.task!.rows?.[id]??t.sheetOrigin!.task!.row)===a.rows?.[id])));
+   const exact=s.tasks.find(t=>t.sourceRefs?.includes(a.key));if(exact)return a.key;
+   const candidates=s.tasks.filter(t=>t.sheetOrigin?.task?.sheetId===a.sheetId&&t.sourceRefs?.some(r=>r.startsWith("td:assignment:"))&&a.memberIds.some(id=>t.memberIds?.includes(id)&&a.sourceRows?.[id]!==undefined&&((t.sheetOrigin!.task!.sourceRows?.[id]??t.sheetOrigin!.task!.rows?.[id]??t.sheetOrigin!.task!.row)===a.sourceRows[id])));
+   const prior=candidates.length===1?candidates[0]:undefined;
    return prior?.sourceRefs?.find(r=>r.startsWith("td:assignment:"))||a.key;
   };
-  const items:{key:string;matter:string;task:Omit<Task,"id"|"createdAt"|"updatedAt"|"matterId">}[]=assignments.map(a=>({key:assignmentKey(a),matter:a.matter,task:{title:a.title,department:config.department,memberIds:a.memberIds,assignee:a.names.join("、"),due:a.date||undefined,workDate:a.date,status:"done",sourceRecorded:true,reviewRequired:false,priority:"normal",note:`來源：團學任務分工 · ${a.matter}\n原表狀態：${a.done?"已完成":"已有紀錄，視為已通過"}\n${a.phase||""}`,sourceRefs:[assignmentKey(a),...a.refs],sheetOrigin:a.sheetId?{task:{sheetId:a.sheetId,row:Object.values(a.rows||{})[0]??0,rows:a.rows}}:undefined}}));
+  const items:{key:string;matter:string;task:Omit<Task,"id"|"createdAt"|"updatedAt"|"matterId">}[]=assignments.map(a=>({key:assignmentKey(a),matter:a.matter,task:{title:a.title,department:config.department,memberIds:a.memberIds,assignee:a.names.join("、"),due:a.date||undefined,workDate:a.date,status:"done",sourceRecorded:true,reviewRequired:false,priority:"normal",note:`來源：團學任務分工 · ${a.matter}\n原表狀態：${a.done?"已完成":"已有紀錄，視為已通過"}\n${a.phase||""}`,sourceRefs:[assignmentKey(a),...a.refs],sheetOrigin:a.sheetId?{task:{sheetId:a.sheetId,row:Object.values(a.sourceRows||a.rows||{})[0]??0,rows:a.rows,sourceRows:a.sourceRows}}:undefined}}));
   for(const r of volunteers.records)if(!r.localTaskId){
-   const prior=s.tasks.find(t=>t.sheetOrigin?.hours?.sheetId===r.sheetId&&t.sheetOrigin?.hours?.row===r.row&&(r.memberId?t.memberIds?.includes(r.memberId):t.assignee===r.name)&&t.sourceRefs?.some(ref=>ref.startsWith("td:hours-task:")));
+   const prior=s.tasks.find(t=>t.sourceRefs?.includes(r.id))||s.tasks.find(t=>t.sheetOrigin?.hours?.sheetId===r.sheetId&&t.sheetOrigin?.hours?.row===r.row&&t.memberIds?.includes(r.memberId!)&&t.sourceRefs?.some(ref=>ref.startsWith("td:hours-task:")));
    const key=prior?.sourceRefs?.find(ref=>ref.startsWith("td:hours-task:"))||`td:hours-task:${r.id}`;items.push({key,matter:r.matterTitle,task:{title:(r.detail.replace(/\d+(?:\.\d+)?\s*(?:h|小时|小時)/gi,"").trim()||`${r.matterTitle} · 出工記錄`).slice(0,180),department:config.department,memberIds:r.memberId?[r.memberId]:[],assignee:r.name,workDate:r.date,due:r.date||undefined,status:"done",sourceRecorded:true,reviewRequired:false,priority:"normal",note:`來源：志願時匯總 · ${r.matterTitle}\n原表姓名：${r.name}\n${r.detail}\n來源時長僅供參考，需確認後才計入。`.slice(0,500),sourceRefs:[key,...r.sourceRefs],sourceHours:r.hours===null||!r.memberId?undefined:{[r.memberId]:r.hours},sheetOrigin:r.sheetId&&r.row!==undefined?{hours:{sheetId:r.sheetId,row:r.row}}:undefined}});
   }
   const stamp=nowISO(),seen=new Set(items.map(a=>a.key)),conflicts:string[]=[];let added=0;
@@ -52,11 +55,12 @@ export async function pullTeamSheets(client:Client,config:TeamSheetState){
    if(existing?.sourceMissing){existing.sourceMissing=false;existing.updatedAt=stamp;}
    if(existing)existing.sheetOrigin=a.task.sheetOrigin;
    const item:Task={...a.task,id:existing?.id||`td_task_${digest(a.key)}`,matterId:matter.id,sourceMissing:false,createdAt:existing?.createdAt||stamp,updatedAt:existing?.updatedAt||stamp};
-   const content=(t:Task)=>{const {updatedAt,createdAt,organization,sourceMissing,sheetOrigin,...rest}=t;return digest(rest);},legacy=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||[content(existing),legacy(existing),legacy({...existing,organization:undefined})].includes(last.local);
-   if(existing){const currentHash=content(existing);if(!canUpdate){if(![nextHash,legacy(item)].includes(last.source))conflicts.push(`${a.matter} · ${a.task.title}：本機及來源均有修改，已保留本機版本，請核對。`);}else if(currentHash!==nextHash)Object.assign(existing,item,{updatedAt:stamp});}
-   else{s.tasks.push(item);added++;}
+   const content=(t:Task)=>{const {updatedAt,createdAt,organization,sourceMissing,sheetOrigin,sourceBaseline,...rest}=t;return digest(rest);},legacy=(t:Task)=>{const {updatedAt,createdAt,...rest}=t;return digest(rest);},nextHash=content(item),last=s.teamSheets.importHashes[item.id],canUpdate=!existing||!last||[content(existing),legacy(existing),legacy({...existing,organization:undefined})].includes(last.local);
+   if(existing){const changed=mergeSourceTask(existing,item,canUpdate);existing.sourceRefs=[...new Set([...(existing.sourceRefs||[]),...(item.sourceRefs||[])])];if(changed.length)conflicts.push(`${a.matter} · ${a.task.title}：${sourceConflictLabels(changed)} 有本機及來源變動，已保留本機欄位，其他欄位繼續更新。`);}
+   else{mergeSourceTask(item,{...item},true);s.tasks.push(item);added++;}
    if(existing&&!existing.sourceRecorded){existing.status="done";existing.reviewRequired=false;existing.sourceRecorded=true;existing.note=existing.note?.replace("已完成，待工作台確認","已通過");}
-   if(canUpdate)s.teamSheets.importHashes[item.id]={local:content(existing||item),source:nextHash};
+   scopeSourceParticipants(existing||item,s.members);
+   s.teamSheets.importHashes[item.id]={local:content(existing||item),source:nextHash};
   }
   for(const t of s.tasks)if(t.sourceRefs?.some(r=>r.startsWith("td:assignment:")||r.startsWith("td:hours-task:"))&&!t.sourceRefs.some(r=>seen.has(r)))t.sourceMissing=true;
   s.teamSheets.volunteers=volunteers.records;s.teamSheets.issues=[...volunteers.issues,...conflicts];s.teamSheets.importedCount=items.length;s.teamSheets.lastPullAt=stamp;s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;
@@ -109,7 +113,7 @@ export async function pushTeamSheets(client:Client,config:TeamSheetState){
 export async function runTeamSheetSync(mode:"all"|"pull"|"push"="all"){
  while(job.running)try{await job.running;}catch{/* A later request can retry a failed run. */}
  const config=readStore().teamSheets;assert(config?.enabled,"請先設定並啟用團學表格同步");assert(tencentConnected(),"請先授權騰訊文檔");
- job.running=(async()=>{try{const client=await tencentClient();let pushError:unknown;if(mode!=="pull")try{await pushTeamSheets(client,config);}catch(e){if(mode==="push")throw e;pushError=e;}if(mode!=="push")await pullTeamSheets(client,readStore().teamSheets!);if(pushError)throw pushError;}catch(e){await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastError=e instanceof AppError?e.message:"同步未完成，請稍後重試";s.teamSheets.lastErrorAt=nowISO();}});throw e;}})();
+ job.running=(async()=>{try{const client=await tencentClient();if(mode!=="push")await pullTeamSheets(client,readStore().teamSheets!);if(mode!=="pull")await pushTeamSheets(client,readStore().teamSheets!);}catch(e){await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastError=e instanceof AppError?e.message:"同步未完成，請稍後重試";s.teamSheets.lastErrorAt=nowISO();}});throw e;}})();
  try{await job.running;}finally{job.running=undefined;}
 }
 export function scheduleTeamSheetPush(){if(job.timer)clearTimeout(job.timer);job.timer=setTimeout(()=>{job.timer=undefined;if(readStore().teamSheets?.enabled&&!job.running&&pendingTeamTasks())void runTeamSheetSync("push").catch(()=>{});},3000);job.timer.unref?.();}
