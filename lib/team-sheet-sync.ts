@@ -8,6 +8,7 @@ import {tencentClient,tencentConnected,type SheetCell,type SheetInfo} from "./te
 import {parseAssignments,parseVolunteer,digest,sheetRows,cellValue,normalized,taskSyncPayload,type SheetSnapshot} from "./team-sheet-data";
 import type {TeamSheetState,Task,Store,SyncedVolunteer} from "./types";
 import {mergeSourceTask,scopeSourceParticipants,sourceConflictLabels} from "./source-task";
+import {ownerWorkPlan} from "./owner-work";
 
 const taskHeader=["序號","時間","任務","姓名","聯繫方式","完成情況","事項","工作台編號","任務ID","成員ID","志願時錄入","同步校驗","更新時間"];
 const hoursHeader=["序號","姓名","任務","線上出工時長","線下出工時長","匯總志願時長/h","錄入情況","日期","任務ID","工作台編號","事項","同步校驗","更新時間"];
@@ -83,14 +84,15 @@ async function managedSheet(client:Client,config:TeamSheetState,kind:"task"|"hou
 }
 function legacyEligibleTasks(s:Store){const c=s.teamSheets;return !c?[]:s.tasks.filter(t=>t.department===c.department&&!t.demo&&!t.sheetDestination&&!t.sourceRefs?.some(r=>r.startsWith("td:"))&&t.createdAt>=c.enabledAt&&t.reportToTeamSheets!==false&&Object.hasOwn(c.taskHashes,t.id));}
 function taskHash(s:Store,t:Task){return digest([t.sheetDestination,taskSyncPayload(t,s.members,s.matters.find(m=>m.id===t.matterId)?.title||t.activityName||"未分類事項")]);}
-export function eligibleTasks(s:Store){return [...legacyEligibleTasks(s),...s.tasks.filter(t=>t.department===s.teamSheets?.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo)];}
-export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>t.sheetDestination&&c.taskHashes[t.id]!==taskHash(s,t)).length+[...new Set([...Object.keys(c.taskHashes),...Object.keys(c.nativeLinks||{})])].filter(id=>!tasks.some(t=>t.id===id)).length;}
+export function eligibleTasks(s:Store){return [...legacyEligibleTasks(s),...s.tasks.filter(t=>t.department===s.teamSheets?.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo),...ownerWorkPlan(s).jobs];}
+export function pendingTeamTasks(s=readStore()){const c=s.teamSheets;if(!c?.enabled)return 0;const tasks=eligibleTasks(s);return tasks.filter(t=>t.sheetDestination&&c.taskHashes[t.id]!==taskHash(s,t)).length+[...new Set([...Object.keys(c.taskHashes),...Object.keys(c.nativeLinks||{})])].filter(id=>(!id.startsWith("owner:")||c.recordOwnerWork&&ownerWorkPlan(s).owner)&&!tasks.some(t=>t.id===id)).length;}
 /** Legacy tabs are frozen. Only explicit removal/migration clears owned keys. */
 async function cleanupLegacySheets(client:Client,config:TeamSheetState){
- const before=readStore(),kept=legacyEligibleTasks(before),removed=Object.keys(config.taskHashes).filter(id=>!before.teamSheets?.nativeLinks?.[id]&&!kept.some(t=>t.id===id));
+ const before=readStore(),kept=legacyEligibleTasks(before),removed=Object.keys(config.taskHashes).filter(id=>!id.startsWith("owner:")&&!before.teamSheets?.nativeLinks?.[id]&&!kept.some(t=>t.id===id));
  if(!removed.length)return;
  for(const kind of ["task","hours"]as const){
-  const target=await managedSheet(client,config,kind),snapshot=await readSheet(client,target.file,target.sheet),rows=sheetRows(snapshot.cells),keyCol=kind==="task"?7:9,cleared:string[]=[];const values:SheetCell[]=[];
+  let target:Awaited<ReturnType<typeof managedSheet>>;try{target=await managedSheet(client,config,kind);}catch(e){if(e instanceof AppError&&e.message.startsWith("舊同步分表已不存在"))continue;throw e;}
+  const snapshot=await readSheet(client,target.file,target.sheet),rows=sheetRows(snapshot.cells),keyCol=kind==="task"?7:9,cleared:string[]=[];const values:SheetCell[]=[];
   for(const [row,cells]of rows){if(!row)continue;const key=String(cells.get(keyCol)||""),taskId=String(cells.get(8)||"");if(!key.startsWith("wb:")||!removed.includes(taskId))continue;
    const old=Array.from({length:13},(_,i)=>cells.get(i) as string|number??"");assert(!snapshot.cells.some(c=>c.row===row&&c.formula)&&digest(old.slice(0,11))===old[11],"舊同步分表有人工改動，原值已保留；請核對後再遷移這項任務",409);
    for(let col=0;col<13;col++)values.push(valueCell(row,col,""));cleared.push(key);
@@ -104,11 +106,14 @@ async function cleanupLegacySheets(client:Client,config:TeamSheetState){
 export async function pushTeamSheets(client:Client,config:TeamSheetState){
  // Finish cleanup in legacy tabs before migrating an opted-in task to original pages.
  await cleanupLegacySheets(client,config);
- const before=readStore(),tasks=before.tasks.filter(t=>t.department===config.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo);
- const changed=tasks.filter(t=>before.teamSheets?.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(before.teamSheets?.nativeLinks||{}).filter(id=>!tasks.some(t=>t.id===id));
- for(const t of changed){await syncNativeTask(client,config,t,t.id);await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");s.teamSheets.taskHashes[t.id]=taskHash(before,t);});}
+ const before=readStore(),ownerPlan=ownerWorkPlan(before),tasks=[...before.tasks.filter(t=>t.department===config.department&&t.reportToTeamSheets===true&&t.sheetDestination&&!t.demo),...ownerPlan.jobs];
+ if(ownerPlan.jobs.length)await mutateStore(s=>{if(s.teamSheets)s.teamSheets.ownerPublicationSources={...s.teamSheets.ownerPublicationSources,...ownerPlan.sourceIds};});
+ const changed=tasks.filter(t=>before.teamSheets?.taskHashes[t.id]!==taskHash(before,t)),removed=Object.keys(before.teamSheets?.nativeLinks||{}).filter(id=>(!id.startsWith("owner:")||config.recordOwnerWork&&ownerPlan.owner)&&!tasks.some(t=>t.id===id));
+ const ownerErrors:string[]=[];
+ for(const t of changed){try{await syncNativeTask(client,config,t,t.id);await mutateStore(s=>{assert(s.teamSheets,"同步設定不存在");s.teamSheets.taskHashes[t.id]=taskHash(before,t);});}catch(e){if(!t.id.startsWith("owner:"))throw e;ownerErrors.push(`${t.title}：${e instanceof AppError?e.message:"回填未完成，將自動重試"}`);}}
  for(const id of removed){await syncNativeTask(client,config,undefined,id);await mutateStore(s=>{if(s.teamSheets)delete s.teamSheets.taskHashes[id];});}
  if(changed.length||removed.length)await mutateStore(s=>{if(s.teamSheets){s.teamSheets.lastPushAt=nowISO();s.teamSheets.lastError=undefined;s.teamSheets.lastErrorAt=undefined;}});
+ if(ownerErrors.length)throw new AppError(`${ownerErrors.length} 項本人工作尚待回填。${ownerErrors.slice(0,3).join("；")}`,409);
 }
 export async function runTeamSheetSync(mode:"all"|"pull"|"push"="all"){
  while(job.running)try{await job.running;}catch{/* A later request can retry a failed run. */}
