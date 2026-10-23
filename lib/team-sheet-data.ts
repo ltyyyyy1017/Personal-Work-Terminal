@@ -28,7 +28,9 @@ function roster(members:Member[],department:string){const groups=new Map<string,
 export function parseAssignments(snapshots:SheetSnapshot[],file:string,department:string,members:Member[],year:number,managedId?:string){
  const match=roster(members,department),groups=new Map<string,ImportedAssignment>();
  for(const {sheet,cells}of snapshots){if(sheet.sheet_id===managedId||/基准模板|基準模板/.test(sheet.sheet_name))continue;
-  const rows=sheetRows(cells),hasSections=[...rows.values()].some(r=>/部[（(]|主席团|主席團/.test(rowText(r,0)));let active=!hasSections&&normalized(sheet.sheet_name).includes(normalized(department.replace(/部$/, ""))),phase="";
+  // A dedicated department page can gain a section later. Its original top rows
+  // still belong to that department, even before the first section heading.
+  const rows=sheetRows(cells);let active=normalized(sheet.sheet_name).includes(normalized(department.replace(/部$/, ""))),phase="";
   const seen=new Map<string,number>();
   for(const [index,row]of [...rows].sort((a,b)=>a[0]-b[0])){
    const label=rowText(row,0);if(/部[（(]|主席团|主席團|统筹[（(]|統籌[（(]/.test(label)){active=normalized(label).includes(normalized(department));phase="";continue;}
