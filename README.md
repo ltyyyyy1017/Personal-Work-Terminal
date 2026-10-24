@@ -84,8 +84,6 @@ Compose 只将端口映射到宿主机 `127.0.0.1:3939`，业务数据保存在�
 ```sh
 pnpm typecheck
 node scripts/check-local-work.cjs
-node scripts/check-local-work.cjs
-node scripts/check-local-work.cjs
 node scripts/check-calendar-entries.mjs
 node scripts/check-volunteer-ledger.mjs
 node scripts/smoke-test.mjs
@@ -105,8 +103,6 @@ scripts/         检查脚本与可选 OCR 工作进程
 docs/           功能与适配说明
 ```
 
-- [本地工作记录](docs/local-work-records.md)
-- [本地工作记录](docs/local-work-records.md)
 - [本地工作记录](docs/local-work-records.md)
 - [个人日程筛选](docs/personal-calendar.md)
 - [报销流程](docs/reimbursement.md)、[材料识别](docs/reimbursement-recognition.md)、[导出格式](docs/reimbursement-export-format.md)
