@@ -282,6 +282,7 @@ export interface Store {
   performance: PerformanceEntry[];
   matters: Matter[];
   icloud?: {account:string;calendars:{id:string;url:string;name:string;color?:string}[];lastReadAt?:string;lastWriteAt?:string};
+  localWorkRecords: LocalWorkRecord[];
   workLogs: WorkLog[];
   members: Member[];
   resources: WorkResource[];
@@ -297,6 +298,7 @@ export interface Store {
   log: LogEntry[];
   github?: GithubSnapshot | null;
   meta: {
+    localWorkVersion?: 1;
     lastBuildAt?: string;
     lastSyncAt?: string;
     device?: string;
@@ -389,3 +391,5 @@ export interface KdocsState {
  publications:Record<string,{sheetId:number;memberId:string;row:number;owned:boolean;recordId?:string;priorRecordIds?:string[];attempted?:boolean;before:{col:number;value:string}[];after:{col:number;value:string}[];previous?:{col:number;value:string}[];accepted?:{col:number;value:string}[][]}[]>;
  taskHashes:Record<string,string>;
 }
+
+export interface LocalWorkRecord {id:string;department:Department;memberId:string;taskId?:string;relatedTaskIds?:string[];matterId?:string;title:string;date:string;hours?:number;volunteerHours?:number;performance?:number;role:"執行"|"審核"|"執行及審核";tableRecorded:boolean;note:string;createdAt:string;updatedAt:string}

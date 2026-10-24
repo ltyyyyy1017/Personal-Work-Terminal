@@ -1,8 +1,7 @@
+import {myCalendarIdentity} from "../../calendar-entries";
+import {recordTaskWork} from "../../local-work";
+import {workValues} from "./local-work";
 import { mutateStore, newId, nowISO, readStore } from "../../store";
-import {scheduleKdocs} from "../../kdocs-sync";
-import {tencentClient} from "../../tencent-docs";
-import {volunteerMemberIds} from "../../task-reporting";
-import {scheduleTeamSheetPush} from "../../team-sheet-sync";
 import { bool, isDateLike, json, str } from "../http";
 import { AppError, assert } from "../../errors";
 import type { CalEvent, Store, Task } from "../../types";
@@ -10,7 +9,6 @@ import { parseLocal } from "../../date";
 import type { Ctx } from "../ctx";
 import { memberIds } from "./workspace";
 import {organizationFor,departmentProfiles} from "../../organizations";
-import {publicityOwner} from "../../owner-work";
 import {requiresMyReview} from "../../task-followup";
 
 const TAGS = ["行政部", "运营部", "个人", "会议", "截止", "差旅", "活动"];
@@ -160,82 +158,41 @@ export async function createTask(ctx: Ctx) {
     task.organization = organizationFor(task.department,s.settings);
     task.memberIds = memberIds(s, body.memberIds ?? [],task.department);
     task.matterId=validateMatter(s,body.matterId,task.department);
-    assert(task.department!=="运营部"||task.status!=="done","运营部任务请创建后通过审批确认志愿时");
+    assert(task.department!=="运营部"||task.status!=="done","请创建任务后完成审批并登记本地工作");
     task.assignee=task.memberIds.map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
     s.tasks.push(task);
   });
-  scheduleTeamSheetPush();scheduleKdocs();return json({ task });
+  return json({ task });
 }
 
 export async function patchTask(ctx: Ctx) {
-  const body = (await ctx.body()) as Record<string, unknown>;
-  let destination:Task["sheetDestination"];
-  if((body.reportToTeamSheets===true||body.sheetDestination&&body.reviewedByOwner===true&&readStore().teamSheets?.recordOwnerWork)&&readStore().teamSheets?.enabled){
-    const c=readStore().teamSheets!;
-    const raw=body.sheetDestination as Record<string,unknown>|undefined;assert(raw&&typeof raw==="object","請選擇任務表與志願時表的原有頁籤");
-    const taskSheetId=str(raw.taskSheetId,"",100),hoursSheetId=str(raw.hoursSheetId,"",100);assert(taskSheetId&&hoursSheetId&&(raw.hoursKind==="online"||raw.hoursKind==="offline"),"請選擇完整的原表位置");
-    const client=await tencentClient(),[taskInfo,hoursInfo]=await Promise.all([client.info(c.taskFileId),client.info(c.hoursFileId)]);
-    const valid=(s:typeof taskInfo.sheets,id:string)=>s.some(t=>t.sheet_id===id&&t.sheet_type==="worksheet"&&!t.hidden&&!/基准模板|基準模板|工作台同步/.test(t.sheet_name));
-    assert(valid(taskInfo.sheets,taskSheetId)&&valid(hoursInfo.sheets,hoursSheetId),"請選擇兩張文件中的原有事項頁籤");destination={taskSheetId,hoursSheetId,hoursKind:raw.hoursKind};
-  }
-  const { result } = await mutateStore((s) => {
-    const task = s.tasks.find((t) => t.id === ctx.params.id);
-    if (!task) throw new AppError("任务不存在", 404);
-    const previousStatus=task.status,previousReport=task.reportToTeamSheets;
-    if(destination)task.sheetDestination=destination;
-    if("kdocsReporting" in body){const r=body.kdocsReporting as Record<string,unknown>;assert(task.department==="行政部"&&r&&typeof r.include==="boolean","行政部上報選項無效");if(r.include)assert(Number.isInteger(r.sheetId)&&s.kdocs?.enabled&&s.kdocs.mappings.some(m=>m.sheetId===r.sheetId),"請選擇已確認欄位的行政部原表頁籤");if(r.include&&s.kdocs?.projects?.some(p=>p.sheetId===r.sheetId))assert(s.kdocs.projects.some(p=>p.sheetId===r.sheetId&&p.id===r.projectId),"請選擇原表中已存在的項目");task.kdocsReporting={include:r.include,sheetId:r.include?Number(r.sheetId):undefined,projectId:r.include&&typeof r.projectId==="string"?r.projectId:undefined};}
-
-    if (typeof body.title === "string") task.title = str(body.title).trim() || task.title;
-    if (["todo", "doing", "waiting", "review", "done"].includes(body.status as string)) task.status = body.status==="review"||body.status==="done"?body.status:"doing";
-    if ("assignee" in body) task.assignee = str(body.assignee, "", 60);
-    if ("activityName" in body) task.activityName = str(body.activityName, "", 120);
-    if ("followUp" in body) task.followUp = isDateLike(body.followUp) ? str(body.followUp) : undefined;
-    if ("link" in body) task.link = safeLink(body.link);
-    if ("kind" in body) task.kind = body.kind === "device" ? "device" : "task";
-    if (typeof body.reviewRequired === "boolean") task.reviewRequired = body.reviewRequired;
-    if (["low", "normal", "high"].includes(body.priority as string)) task.priority = body.priority as Task["priority"];
-    if (departmentProfiles(s.settings).some(p=>p.id===body.department)) {
-      task.department = body.department as Task["department"];
-    }
-    if ("due" in body) task.due = isDateLike(body.due) ? str(body.due) : undefined;
-    if("workDate" in body){assert(isDateLike(body.workDate)&&body.workDate.length===10,"請填寫有效的實際出工日期");task.workDate=body.workDate;}
-    if ("note" in body) task.note = str(body.note, "", 500) || undefined;
-    const previousMembers=JSON.stringify(task.memberIds||[]);
-    task.memberIds=memberIds(s,"memberIds" in body?body.memberIds:task.memberIds||[],task.department);
-    task.organization=organizationFor(task.department,s.settings);
-    task.matterId=validateMatter(s,"matterId" in body?body.matterId:task.matterId,task.department);
-    if("reportToTeamSheets" in body){assert(typeof body.reportToTeamSheets==="boolean","請選擇是否計入團委表格");assert(task.department==="运营部","只有运营部任務需要選擇團委上報方式");task.reportToTeamSheets=body.reportToTeamSheets;}
-    const publicity=task.department==="运营部",personal=task.reportToTeamSheets===false;
-    const countable=volunteerMemberIds(task,s.members);
-    if(publicity&&task.status==="done"&&(previousStatus!=="done"||"volunteerHours" in body))assert(typeof task.reportToTeamSheets==="boolean","完結前請選擇是否計入團委表格");
-    if(previousMembers!==JSON.stringify(task.memberIds)&&task.status==="done"&&publicity&&!personal&&countable.length&&!("volunteerHours" in body)){assert(body.status!=="done","执行成员已变更，请重新确认志愿时");task.status="review";}
-    task.assignee=(task.memberIds||[]).map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
-    if(publicity&&!personal&&"volunteerHours" in body){
-      assert(task.status==="done","请先通过审批，再确认志愿时");
-      assert(task.memberIds?.length,"请至少选择一位执行成员");
-      assert(body.volunteerHours&&typeof body.volunteerHours==="object"&&!Array.isArray(body.volunteerHours),"请填写各执行成员的志愿时");
-      const hours:Record<string,number>={};
-      for(const [id,value] of Object.entries(body.volunteerHours)){assert(task.memberIds.includes(id),"志愿时只能登记给执行成员");assert(typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=1000,"志愿时须为 0–1000 小时");if(countable.includes(id))hours[id]=Math.round(value*100)/100;}
-      assert(countable.every(id=>id in hours),"请填写每位执行成员的志愿时，无时长填写 0");task.volunteerHours=hours;task.volunteerEntered=countable.length>0&&body.volunteerEntered===true;
-    }
-    if(publicity&&!personal&&task.status==="done"&&(previousStatus!=="done"||previousReport!==true&&body.reportToTeamSheets===true)&&!("volunteerHours" in body)){
-      assert(task.memberIds?.length,"請選擇執行成員；個人備忘可選擇僅個人紀錄");
-      assert(countable.every(id=>typeof task.volunteerHours?.[id]==="number"),"通过前请确认每位执行成员的志愿时");
-    }
-    if(publicity&&personal)for(const w of s.workLogs.filter(w=>w.taskId===task.id)){w.volunteerHours=undefined;w.volunteerConfirmed=false;w.volunteerEntered=false;w.updatedAt=nowISO();}
-    if(publicity){
-      task.volunteerHours=personal?undefined:task.volunteerHours&&Object.fromEntries(Object.entries(task.volunteerHours).filter(([id])=>countable.includes(id)));
-      if(personal||!countable.length)task.volunteerEntered=false;
-    }
-    if("volunteerEntered" in body&&!personal&&countable.length){assert(publicity&&task.status==="done"&&task.volunteerHours,"仅已通过并确认志愿时的任务可以标记录入");task.volunteerEntered=body.volunteerEntered===true;}
-    if(task.status==="done"&&task.department==="运营部"&&(body.reviewedByOwner===true||previousStatus!=="done"&&requiresMyReview(task))){const owner=publicityOwner(s);if(owner){task.reviewerMemberIds=[...new Set([...(task.reviewerMemberIds||[]),owner.id])];task.reviewedAt=nowISO();}}
-    if(task.sheetDestination&&task.status==="done"&&task.department==="运营部"&&s.teamSheets?.recordOwnerWork&&publicityOwner(s)){s.teamSheets.ownerDestinations??={};if(task.matterId)s.teamSheets.ownerDestinations[task.matterId]=task.sheetDestination;}
-    if(task.status==="done"&&!task.approvedAt)task.approvedAt=nowISO();
-    if(task.status!=="done"){task.approvedAt=undefined;task.volunteerEntered=false;task.volunteerHours=undefined;}
-    task.updatedAt = nowISO();
-    return task;
-  });
-  scheduleTeamSheetPush();scheduleKdocs();return json({ task: result });
+ const body=await ctx.body<Record<string,unknown>>();
+ assert(!["sheetDestination","kdocsReporting","reportToTeamSheets"].some(k=>k in body),"表格連接已移除，請使用本地工作紀錄",410);
+ const {result}=await mutateStore(s=>{
+  const task=s.tasks.find(t=>t.id===ctx.params.id);assert(task,"任務不存在",404);const previous=task.status;
+  if(typeof body.title==="string")task.title=str(body.title,"",200).trim()||task.title;
+  if(["doing","review","done"].includes(String(body.status)))task.status=body.status as Task["status"];
+  if("assignee"in body)task.assignee=str(body.assignee,"",60);
+  if("activityName"in body)task.activityName=str(body.activityName,"",120);
+  if("followUp"in body)task.followUp=isDateLike(body.followUp)?str(body.followUp):undefined;
+  if("link"in body)task.link=safeLink(body.link);
+  if("kind"in body)task.kind=body.kind==="device"?"device":"task";
+  if(typeof body.reviewRequired==="boolean")task.reviewRequired=body.reviewRequired;
+  if(["low","normal","high"].includes(String(body.priority)))task.priority=body.priority as Task["priority"];
+  if(departmentProfiles(s.settings).some(p=>p.id===body.department))task.department=body.department as Task["department"];
+  if("due"in body)task.due=isDateLike(body.due)?str(body.due):undefined;
+  if("workDate"in body){assert(typeof body.workDate==="string"&&body.workDate.length===10&&isDateLike(body.workDate),"請填寫有效的工作日期");task.workDate=body.workDate;}
+  if("note"in body)task.note=str(body.note,"",500)||undefined;
+  task.memberIds=memberIds(s,"memberIds"in body?body.memberIds:task.memberIds||[],task.department);
+  task.organization=organizationFor(task.department,s.settings);task.matterId=validateMatter(s,"matterId"in body?body.matterId:task.matterId,task.department);
+  task.assignee=task.memberIds.map(id=>s.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")||task.assignee;
+  if(task.status==="done"&&(body.reviewedByOwner===true||previous!=="done"&&requiresMyReview(task))){const identity=myCalendarIdentity(s),owners=s.members.filter(m=>m.department===task.department&&identity.ids.has(m.id));if(owners.length===1){task.reviewerMemberIds=[...new Set([...(task.reviewerMemberIds||[]),owners[0].id])];task.reviewedAt=nowISO();}}
+  if(task.status==="done"&&!task.approvedAt)task.approvedAt=nowISO();
+  if(task.status!=="done")task.approvedAt=undefined;
+  const values="localWorkEntries"in body?workValues(body.localWorkEntries,task.memberIds):undefined;
+  assert(!values||task.status==="done","完成任務後才可記錄本次工作");
+  task.updatedAt=nowISO();recordTaskWork(s,task,values);return task;
+ });return json({task:result});
 }
 
 export async function deleteTask(ctx: Ctx) {
@@ -244,7 +201,7 @@ export async function deleteTask(ctx: Ctx) {
     if (idx < 0) throw new AppError("任务不存在", 404);
     s.tasks.splice(idx, 1);
   });
-  scheduleTeamSheetPush();scheduleKdocs();return json({ ok: true });
+  return json({ ok: true });
 }
 
 export { TAGS };

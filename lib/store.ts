@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type { LogEntry, Settings, Store } from "./types";
 import {organizationFor,departmentProfiles,DEFAULT_DEPARTMENTS} from "./organizations";
+import {migrateLocalWork} from "./local-work";
 import {atomicWrite} from "./atomic-file";
 
 // Private data is a runtime mount, not a build dependency to copy into standalone output.
@@ -84,6 +85,7 @@ export function defaultStore(): Store {
     matters: [],
     performance: [],
     workLogs: [],
+    localWorkRecords: [],
     resources: [],
     createdAt: nowISO(),
     settings: { ...DEFAULT_SETTINGS },
@@ -113,7 +115,7 @@ function cache(): Cache {
 
 function normalize(store: Partial<Store>): Store {
   const base = defaultStore();
-  return {
+  const result:Store = {
     ...base,
     ...store,
     settings: {
@@ -139,7 +141,10 @@ function normalize(store: Partial<Store>): Store {
     tokens: store.tokens ?? [],
     log: store.log ?? [],
     meta: store.meta ?? {},
+    localWorkRecords: store.localWorkRecords ?? [],
   };
+  migrateLocalWork(result);
+  return result;
 }
 
 export function readStore(force = false): Store {

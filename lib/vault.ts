@@ -51,3 +51,5 @@ export function migrateResourceCredentials(ids:string[]){
     atomicWrite(vaultPath(),JSON.stringify({version:1,iv:iv.toString("base64"),tag:cipher.getAuthTag().toString("base64"),data:data.toString("base64")}));
   }
 }
+
+export function removeCredentials(ids:string[]){if(!fs.existsSync(vaultPath()))return;const values=read();if(!ids.some(id=>Object.hasOwn(values,id)))return;for(const id of ids)delete values[id];const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv("aes-256-gcm",key(),iv),data=Buffer.concat([cipher.update(JSON.stringify(values),"utf8"),cipher.final()]);atomicWrite(vaultPath(),JSON.stringify({version:1,iv:iv.toString("base64"),tag:cipher.getAuthTag().toString("base64"),data:data.toString("base64")}));}

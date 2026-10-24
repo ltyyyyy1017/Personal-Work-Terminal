@@ -1,6 +1,6 @@
 # Personal Work Terminal · 个人工作台
 
-一个可自行部署的**单用户工作台**，将分散在不同组织、文档和网站中的工作集中管理：按事项安排任务，查看自己的日程，整理报销材料，再按需同步回原有表格。
+一个可自行部署的**单用户工作台**，将分散在不同组织、文档和网站中的工作集中管理：按事项安排任务，查看自己的日程，整理报销材料，在本地记录每位成员的工作与时长，再手动标记是否已填入外部表格。
 
 采用 Next.js、React、TypeScript 与文件存储，支持本机运行和云端部署。初始只有通用部门模板，成员、任务、材料与服务连接由使用者自行添加。
 
@@ -14,7 +14,7 @@
 | 报销材料 | 批量管理、材料识别与自动填入、关联事项；区分经办人与报销人，记录打车路线和同行人 |
 | 材料导出 | 单笔或整个事项打包，生成 PDF、Excel 与 ZIP；支持收支明细格式和繁体材料命名 |
 | 出工与绩效 | 出工、实际时长、志愿时确认与录入状态、原始绩效计次；原表分值另作来源参考 |
-| 原表同步 | 可连接腾讯文档与金山文档，按原表分类、去重，选择原有位置回填或仅保留私人记录 |
+| 本地工作记录 | 按成员记录工作、日期、当次时长及志愿时／绩效，手动标记是否已同步到表格，可筛选并导出明细 |
 | 其他连接 | iCloud 日历双向手动同步、GitHub 仓库动态、可选 DeepSeek 任务辅助，以及可配置的设备与网站入口 |
 | 账号与访问 | 单主账号登录、受信设备、扫码授权及通行密钥；连接凭据加密保存 |
 
@@ -55,13 +55,11 @@ pnpm start
 
 ## 连接原有服务
 
-- **腾讯文档**：在出工与志愿时页面授权，连接现有任务表和时长表。完成任务时选择原页签，或仅保留在工作台；来源时长不会因导入而直接累加。
-- **金山文档**：在绩效页连接原工作概览，支持普通表格和多维表格。多维表格保留原项目、成员关系及记录 ID；已有分值单独展示。
 - **本人身份**：在设置中选择不同部门里的本人身份，并补充姓名别名，供个人日程筛选使用。
 - **iCloud、GitHub、AI**：按需在各自页面配置。日历手动选择读取范围与发布项目；AI 只在调用相关辅助功能时使用。
 - **设备与网站入口**：通过已登录的工作入口导入接口配置资源。设备服务需要适配接口；登录助手需要同步配置精确目标域名，参见 [`browser-helper/README.txt`](browser-helper/README.txt)。
 
-第三方功能需要使用者自己的账号及相应读写权限。腾讯文档与普通表格同步存在约定的表头和业务规则，使用其他表结构时请先核对适配说明。来源无法确认的姓名、日期、项目或评分保留待核对，不自动猜填。
+表格连接及自动读写模块已移除。工作、时长与填表状态仅保存在工作台的数据目录；“已同步”由使用者在手动填表后勾选，修改工作内容或时长后自动回到“未同步”。历史资料缺少的日期和时长保留空白。其他第三方连接仍需使用者自己的账号及权限。
 
 ## 报销识别
 
@@ -85,16 +83,16 @@ Compose 只将端口映射到宿主机 `127.0.0.1:3939`，业务数据保存在�
 
 ```sh
 pnpm typecheck
+node scripts/check-local-work.cjs
+node scripts/check-local-work.cjs
+node scripts/check-local-work.cjs
 node scripts/check-calendar-entries.mjs
-node scripts/check-team-sheets.cjs
-node scripts/check-kdocs.cjs
-node scripts/check-kdocs-database.cjs
 node scripts/check-volunteer-ledger.mjs
 node scripts/smoke-test.mjs
 node scripts/check-security.mjs
 ```
 
-测试使用隔离目录、虚构样例及模拟表格。`scripts/` 还提供报销识别、导出、账号和通行密钥的专项检查；检查名称及用途可直接查看相应脚本。
+测试使用隔离目录、虚构样例；本地工作记录测试禁止网络访问。`scripts/` 还提供报销识别、导出、账号和通行密钥的专项检查；检查名称及用途可直接查看相应脚本。
 
 ## 项目结构与说明
 
@@ -107,9 +105,10 @@ scripts/         检查脚本与可选 OCR 工作进程
 docs/           功能与适配说明
 ```
 
+- [本地工作记录](docs/local-work-records.md)
+- [本地工作记录](docs/local-work-records.md)
+- [本地工作记录](docs/local-work-records.md)
 - [个人日程筛选](docs/personal-calendar.md)
-- [腾讯文档同步](docs/team-sheet-sync.md)
-- [金山文档同步](docs/kdocs-sync.md)
 - [报销流程](docs/reimbursement.md)、[材料识别](docs/reimbursement-recognition.md)、[导出格式](docs/reimbursement-export-format.md)
 - [安全与部署边界](SECURITY.md)
 
