@@ -1,6 +1,6 @@
 import { DEFAULT_NAMING, KIND_ORDER } from "./constants";
 import type { ReimbActivity, ReimbFile, ReimbItem } from "./types";
-import {traditional} from "./export-traditional";
+import {exportText} from "./export-traditional";
 import {exportExtension,MATERIAL_EXTENSIONS} from "./reimbursement-formats";
 
 /** 128 / 128.5 / 1280.05，去掉多余小数位 */
@@ -28,6 +28,7 @@ export function sanitizeFileBase(name: string): string {
 }
 
 export function materialFileName(opts: {
+  department?: string;
   seq: string;
   item: string;
   amount: number | null;
@@ -42,7 +43,7 @@ export function materialFileName(opts: {
     .replace(/\{amount\}/g, formatAmount(opts.amount))
     .replace(/\{kind\}/g, opts.kind)
     .replace(/\{date\}/g, "");
-  const safeBase = shortFileBase(traditional(base), 180);
+  const safeBase = shortFileBase(exportText(base,opts.department), 180);
   const label = opts.kind === "同行人" && !safeBase.includes("同行人") ? `${safeBase}-同行人` : safeBase;
   const extension=opts.extension||".pdf";if(!MATERIAL_EXTENSIONS.includes(extension as typeof MATERIAL_EXTENSIONS[number]))throw new Error("不支援的匯出格式");
   return `${label}${extension}`;
@@ -58,8 +59,8 @@ export function shortFileBase(name: string, maxBytes: number): string {
   return result.trim();
 }
 
-export function reimbursementPackageBase(activity: Pick<ReimbActivity, "name" | "submitter">): string {
-  return traditional(`报销人-${shortFileBase(traditional(activity.submitter), 60) || "未填写"}_${shortFileBase(traditional(activity.name), 100) || "未命名"}_报销材料`);
+export function reimbursementPackageBase(activity: Pick<ReimbActivity, "name" | "submitter"> & Partial<Pick<ReimbActivity,"department">>): string {
+  return exportText(`报销人-${shortFileBase(exportText(activity.submitter,activity.department),60)||"未填写"}_${shortFileBase(exportText(activity.name,activity.department),100)||"未命名"}_报销材料`,activity.department);
 }
 
 export function kindRank(kind: string): number {
@@ -89,7 +90,7 @@ export interface NamingPlanRow {
 
 /** 依据事项顺序与材料类型顺序，生成 1-1 / 1-2 / 2-1 这样的编号与最终文件名 */
 export function namingPlan(
-  activity: Pick<ReimbActivity, "items" | "files">,
+  activity: Pick<ReimbActivity, "items" | "files"> & Partial<Pick<ReimbActivity,"department">>,
   template?: string,
 ): NamingPlanRow[] {
   const rows: NamingPlanRow[] = [];
@@ -107,6 +108,7 @@ export function namingPlan(
         kind: file.kind,
         amount: item.amount,
         name: materialFileName({
+          department: activity.department,
           seq,
           item: item.name,
           amount: item.amount,
@@ -128,6 +130,7 @@ export function namingPlan(
       kind: file.kind,
       amount: null,
       name: materialFileName({
+          department: activity.department,
         seq,
         item: "未归类",
         amount: null,

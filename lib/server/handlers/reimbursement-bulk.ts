@@ -7,7 +7,7 @@ import {json,str} from "../http";
 import {isReported} from "../../reimbursement-progress";
 import {contentDisposition,resolveInside} from "../../files";
 import {shortFileBase} from "../../naming";
-import {traditional} from "../../export-traditional";
+import {exportText} from "../../export-traditional";
 import {buildActivity} from "../../build";
 import type {Ctx} from "../ctx";
 
@@ -26,9 +26,9 @@ export async function bulk(ctx:Ctx){
     for(const [index,a]of records.entries()){
       const {output}=await buildActivity(a.id);const current=readStore().activities.find(r=>r.id===a.id);assert(current,"報銷在打包期間已刪除，請重試",409);
       const file=resolveInside(dirs.root,path.join(output.dir,output.zipName)),data=fs.readFileSync(file);bytes+=data.length;assert(bytes<=128*1024*1024,"生成材料超過 128 MB，請分批打包");
-      zip.file(`${String(index+1).padStart(2,"0")}_報銷人-${shortFileBase(traditional(a.submitter||"未填寫"),55)}_${shortFileBase(traditional(a.name),90)}.zip`,data);
+      zip.file(exportText(`${String(index+1).padStart(2,"0")}_报销人-${shortFileBase(exportText(a.submitter||"未填写",a.department),55)}_${shortFileBase(exportText(a.name,a.department),90)}.zip`,a.department),data);
     }
-    return new Response(new Uint8Array(await zip.generateAsync({type:"uint8array",compression:"DEFLATE"})),{headers:{"content-type":"application/zip","content-disposition":contentDisposition(`批量報銷材料_${records.length}筆.zip`),"cache-control":"no-store"}});
+    return new Response(new Uint8Array(await zip.generateAsync({type:"uint8array",compression:"DEFLATE"})),{headers:{"content-type":"application/zip","content-disposition":contentDisposition(exportText(`批量报销材料_${records.length}笔.zip`,records.every(a=>a.department==="行政部")?"行政部":undefined)),"cache-control":"no-store"}});
    }finally{ids.forEach(id=>running.delete(id));}
  }
  assert(ids.every(id=>!running.has(id)),"部分報銷正在打包，請稍候",409);

@@ -20,3 +20,7 @@
 ```
 
 使用 `format: "standard"` 可保留標準格式。更新單一部門的設定會保留其他部門的格式。
+
+## Export script by department
+
+Generated package names, folders, material filenames, text manifests and spreadsheet text use Simplified Chinese for the publicity department and Traditional Chinese only for the internal affairs department. Bulk exports keep each reimbursement’s own department script; mixed-department outer bundle labels use Simplified Chinese. The same rule covers single reimbursements and whole matters. Existing publicity packages generated under the old rule are rebuilt on the next ZIP/Excel download. Source invoice and Office binaries remain original attachments.
