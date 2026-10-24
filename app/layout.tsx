@@ -1,3 +1,4 @@
+import "./local-work.css";
 import type { Metadata } from "next";
 import "./globals.css";
 import "./upgrade.css";

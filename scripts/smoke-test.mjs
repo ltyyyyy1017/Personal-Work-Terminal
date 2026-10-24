@@ -115,7 +115,7 @@ try{
   assert.deepEqual(task.memberIds,participants);
   assert.equal((await fetch(`${base}/api/tasks/${task.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({memberIds:["missing-member"]})})).status,400);
   assert.deepEqual((await json("state")).tasks.find(t=>t.id===task.id).memberIds,participants);
-  for(const status of ["todo","doing","waiting","review","done"]){const patched=await json(`tasks/${task.id}`,"PATCH",{status,...(status==="done"?{reportToTeamSheets:true,volunteerHours:Object.fromEntries(participants.map(id=>[id,2])),volunteerEntered:false}:{})});assert.equal(patched.task.status,["todo","waiting"].includes(status)?"doing":status);}
+  for(const status of ["todo","doing","waiting","review","done"]){const patched=await json(`tasks/${task.id}`,"PATCH",{status,...(status==="done"?{localWorkEntries:participants.map(memberId=>({memberId,hours:2,tableRecorded:false}))}:{})});assert.equal(patched.task.status,["todo","waiting"].includes(status)?"doing":status);}
   assert.equal((await fetch(`${base}/api/tasks`,{method:"POST",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({title:"invalid",link:"javascript:alert(1)"})})).status,400);
   await startRestart();
   assert.equal((await json("state")).members.find(m=>m.id===participants[0]).avatar,avatarMember.avatar);
@@ -125,30 +125,20 @@ try{
   assert.deepEqual((await json("state")).tasks.find(t=>t.id===task.id).memberIds,participants);
   assert.equal((await json("workspace/credential","POST",{id:"test-site",authorization:(await json("workspace/credential/authorize","POST",{id:"test-site",operation:"copy",current:password})).authorization})).password,"fake-test-secret");
   const privateTask=(await json("tasks","POST",{title:"私人完成備忘",department:"运营部",reviewRequired:false,memberIds:[]})).task;
-  assert.equal(privateTask.reportToTeamSheets,undefined);
-  const undecided=await fetch(`${base}/api/tasks/${privateTask.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({status:"done"})});assert.equal(undecided.status,400);
-  const privateDone=(await json(`tasks/${privateTask.id}`,"PATCH",{status:"done",reportToTeamSheets:false})).task;assert.equal(privateDone.status,"done");assert.equal(privateDone.reportToTeamSheets,false);assert.equal(privateDone.volunteerHours,undefined);assert.equal(privateDone.volunteerEntered,false);
-  await json(`tasks/${privateTask.id}`,"DELETE");
-  await json(`members/${participants[0]}`,"PATCH",{role:"副部长"});
-  const leadership=(await json("tasks","POST",{title:"部長與幹事共同出工",department:"运营部",memberIds:participants})).task;
-  const approvedLeadership=(await json(`tasks/${leadership.id}`,"PATCH",{status:"done",reportToTeamSheets:true,volunteerHours:{[participants[1]]:1.5},volunteerEntered:true})).task;assert.deepEqual(approvedLeadership.volunteerHours,{[participants[1]]:1.5});
-  const onlyLeader=(await json("tasks","POST",{title:"部長任務只記詳情",department:"运营部",memberIds:[participants[0]]})).task;
-  const leaderDone=(await json(`tasks/${onlyLeader.id}`,"PATCH",{status:"done",reportToTeamSheets:true})).task;assert.equal(leaderDone.status,"done");assert.equal(leaderDone.volunteerEntered,false);
-  const revisedPrivate=(await json(`tasks/${leadership.id}`,"PATCH",{reportToTeamSheets:false})).task;assert.equal(revisedPrivate.volunteerHours,undefined);assert.equal(revisedPrivate.volunteerEntered,false);
-  const privateWork=(await json("work-logs","POST",{title:"私人任務關聯出工",date:"2026-10-20",start:"14:00",end:"15:00",memberIds:participants,taskId:leadership.id,status:"done",volunteerHours:{[participants[1]]:5},volunteerConfirmed:true})).workLog;assert.deepEqual(privateWork.volunteerHours,{});assert.equal(privateWork.volunteerConfirmed,false);
-  await json(`work-logs/${privateWork.id}`,"DELETE");await json(`tasks/${leadership.id}`,"DELETE");await json(`tasks/${onlyLeader.id}`,"DELETE");await json(`members/${participants[0]}`,"PATCH",{role:"干事"});
-  console.log("PASS completion requires reporting choice; personal records need no hours; leader-only/mixed tasks keep blank leadership hours; private linked work excluded");
-  console.log("PASS legacy task state normalization, approval and persistence across server restart");
-  const passed=(await json("state")).tasks.find(t=>t.id===task.id);assert.equal(passed.volunteerHours[participants[0]],2);
-  await json(`tasks/${task.id}`,"PATCH",{volunteerEntered:true});assert.equal((await json("state")).tasks.find(t=>t.id===task.id).volunteerEntered,true);
-  const missingHours=await fetch(`${base}/api/tasks/${task.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({status:"done",volunteerHours:{[participants[0]]:3}})});assert.equal(missingHours.status,400);assert.equal((await json("state")).tasks.find(t=>t.id===task.id).volunteerHours[participants[0]],2);
-  await json(`tasks/${task.id}`,"PATCH",{status:"review"});assert.equal((await json("state")).tasks.find(t=>t.id===task.id).volunteerHours,undefined);assert.equal((await json("state")).tasks.find(t=>t.id===task.id).volunteerEntered,false);
-  const skipHours=await fetch(`${base}/api/tasks/${task.id}`,{method:"PATCH",headers:{cookie,"content-type":"application/json"},body:JSON.stringify({status:"done"})});assert.equal(skipHours.status,400);
-  await json(`tasks/${task.id}`,"PATCH",{status:"done",volunteerHours:Object.fromEntries(participants.map(id=>[id,1.25])),volunteerEntered:false});
-  const approvedDate=(await json("state")).tasks.find(t=>t.id===task.id).approvedAt;assert.ok(approvedDate);
-  await json(`tasks/${task.id}`,"PATCH",{note:"审批后补充备注"});assert.equal((await json("state")).tasks.find(t=>t.id===task.id).approvedAt,approvedDate);
-  await json(`tasks/${task.id}`,"PATCH",{memberIds:[participants[0]]});const changedExecutors=(await json("state")).tasks.find(t=>t.id===task.id);assert.equal(changedExecutors.status,"review");assert.equal(changedExecutors.volunteerHours,undefined);assert.equal(changedExecutors.approvedAt,undefined);
-  await json(`tasks/${task.id}`,"PATCH",{status:"done",memberIds:participants,volunteerHours:Object.fromEntries(participants.map(id=>[id,1.25])),volunteerEntered:false});
+  assert.equal((await json('tasks/'+privateTask.id,'PATCH',{status:'done'})).task.status,'done');
+  await json('tasks/'+privateTask.id,'DELETE');
+  for(const route of ['team-sheets','team-sheets/sync','team-sheets/connect','kdocs','kdocs/sync','kdocs/config']){const r=await fetch(base+'/api/'+route,{method:'POST',headers:{cookie,'content-type':'application/json'},body:'{}'});assert.equal(r.status,410);}
+  let work=(await json('work-records')).records.find(r=>r.taskId===task.id&&r.memberId===participants[0]);assert(work);assert.equal(work.hours,2);assert.equal(work.tableRecorded,false);
+  await json('work-records/'+work.id,'PATCH',{tableRecorded:true});assert.equal((await json('work-records')).records.find(r=>r.id===work.id).tableRecorded,true);
+  await json('work-records/'+work.id,'PATCH',{hours:1.25});assert.equal((await json('work-records')).records.find(r=>r.id===work.id).tableRecorded,false);
+  await startRestart();work=(await json('work-records')).records.find(r=>r.id===work.id);assert.equal(work.hours,1.25);assert.equal(work.tableRecorded,false);
+  await json('work-records/'+work.id,'PATCH',{tableRecorded:true});assert.equal((await json('work-records')).records.find(r=>r.taskId===task.id&&r.memberId===participants[1]).tableRecorded,false);
+  const invalidLocalWork=await fetch(base+'/api/work-records/'+work.id,{method:'PATCH',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({hours:-1})});assert.equal(invalidLocalWork.status,400);
+  const legacyWrite=await fetch(base+'/api/tasks/'+task.id,{method:'PATCH',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({reportToTeamSheets:true})});assert.equal(legacyWrite.status,410);
+  const manual=(await json('work-records','POST',{department:'运营部',memberId:participants[0],title:'独立本地出工',date:'2026-10-24',hours:0,tableRecorded:false})).record;assert.equal(manual.hours,0);await json('work-records/'+manual.id,'DELETE');assert(!(await json('work-records')).records.some(r=>r.id===manual.id));
+  const approvedDate=(await json('state')).tasks.find(t=>t.id===task.id).approvedAt;assert.ok(approvedDate);
+  await json('tasks/'+task.id,'PATCH',{note:'审批后补充备注'});assert.equal((await json('state')).tasks.find(t=>t.id===task.id).approvedAt,approvedDate);
+  console.log('PASS removed document endpoints return 410; per-member local hours and manual table flags persist, invalidate on edits, reject stale connector writes, support zero hours and delete without external side effects');
   const {event}=await json("events","POST",{title:"测试日程",start:"2026-10-21T14:00",end:"2026-10-21T15:00",tags:["运营部"],location:"测试器材室"});
   await json(`events/${event.id}`,"PATCH",{title:"已修改日程"});assert.equal((await json("state")).events.find(e=>e.id===event.id).title,"已修改日程");
   await json(`events/${event.id}`,"DELETE");

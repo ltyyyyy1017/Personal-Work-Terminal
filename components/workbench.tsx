@@ -9,7 +9,7 @@ import ResourceHub from "./resource-workspace";
 import {AccountSettings} from "./account-access";
 import EquipmentWorkspace from "./equipment-portal";
 import MemberManagement from "./member-management";
-import WorkLogPanel from "./work-records";
+import LocalWorkRecords from "./local-work-records";
 import PlannerComposer from "./planner-composer";
 import {GithubPanel,AssistantSettings} from "./integrations";
 import EditorDialog from "./editor-dialog";
@@ -17,8 +17,7 @@ import WorkspaceSidebar from "./workspace-sidebar";
 import ICloudCalendar from "./icloud-calendar";
 import HomeSchedule from "./home-schedule";
 import CalendarIdentity from "./calendar-identity";
-import KdocsTaskApproval from "./kdocs-task-approval";
-import TaskApproval from "./task-approval";
+import TaskApproval from "./local-task-approval";
 import ReimbursementList from "./reimbursement-list";
 import ReimbursementDetails from "./reimbursement-details";
 import {isReported,isFunded} from "@/lib/reimbursement-progress";
@@ -27,7 +26,6 @@ import EquipmentBorrowings,{useEquipmentBorrowings} from "./equipment-borrowings
 import DepartmentSettings from "./department-settings";
 import {DepartmentProvider} from "./department-context";
 import {MatterBoard,MatterEditor} from "./matter-board";
-import {PerformancePanel} from "./department-records";
 import ReimbursementIntake from "./reimbursement-intake";
 import BillingSettings from "./billing-settings";
 import WorkspaceEmbed from "./workspace-embed";
@@ -41,7 +39,7 @@ import { MAT_KINDS } from "@/lib/constants";
 import type { CheckItem } from "@/lib/checks";
 
 type Page = "library" | "performance" | "volunteer" | "icloud" | "github" | "worklogs" | "resources" | "home" | "devices" | "tasks" | "calendar" | "reimburse" | "docs" | "settings";
-type Data = {teamSheets?:import("@/lib/types").TeamSheetState;matters:import("@/lib/types").Matter[];workLogs:import("@/lib/types").WorkLog[];members:Member[];resources:ResourceView[];tasks:Task[];events:CalEvent[];activities:ReimbActivity[];docs:DocFile[];settings:Settings;demo:boolean;system:{dataDir:string;authRequired:boolean};};
+type Data = {matters:import("@/lib/types").Matter[];workLogs:import("@/lib/types").WorkLog[];members:Member[];resources:ResourceView[];tasks:Task[];events:CalEvent[];activities:ReimbActivity[];docs:DocFile[];settings:Settings;demo:boolean;system:{dataDir:string;authRequired:boolean};};
 type Modal = {type:"task"|"event"|"activity"|"item"|"file"|"confirm";task?:Task;event?:CalEvent;activity?:ReimbActivity;itemId?:string;fileId?:string;device?:boolean;memberIds?:string[];matterId?:string;defaultDepartment?:string;title?:string;description?:string;action?:()=>Promise<void>};
 const nav = [{id:"library",label:"图书馆预约",icon:BookOpen},{id:"home",label:"工作概览",icon:LayoutGrid},{id:"devices",label:"设备事务",icon:Camera},{id:"tasks",label:"部员对接",icon:UsersRound},{id:"calendar",label:"日程安排",icon:CalendarDays},{id:"worklogs",label:"出工与志愿时",icon:CheckCheck},{id:"reimburse",label:"报销整理",icon:ReceiptText},{id:"docs",label:"共享文件",icon:FolderOpen},{id:"resources",label:"工作入口",icon:Link2},{id:"github",label:"GitHub 项目",icon:Github},{id:"icloud",label:"iCloud 日历",icon:CalendarDays},{id:"volunteer",label:"出工与志愿时",icon:CheckCheck},{id:"performance",label:"行政部绩效表",icon:CheckCheck}] as const;
 const statuses: Record<Task["status"],string> = {doing:"待审批",review:"审批中",done:"通过"};
@@ -111,9 +109,9 @@ export default function Workbench() {
   const openFollowups=()=>{go("tasks");setShowMembers(false);setGrouped(false);setBoard(false);setTaskFilter("followup");};
   const taskRows=(rows:Task[],limit?:number)=>rows.length?<div className="task-list">{rows.slice(0,limit).map(t=><div className={`task-row ${t.status==="done"?"completed":""}`} key={t.id}>
     <button className={`task-check ${t.status==="done"?"checked":""}`} disabled={busy} onClick={()=>patchTask(t,t.status==="done"?"doing":t.status==="review"||!requiresMyReview(t)?"done":"review")} title={t.status==="done"?"重新打开":t.status==="review"?"通过":requiresMyReview(t)?"开始审批":"完成"} aria-label={`${t.status==="done"?"重新打开":t.status==="review"?"通过":requiresMyReview(t)?"开始审批":"完成"}${t.title}`}>{t.status==="done"&&<Check size={12}/>}</button>
-    <button className="task-main" onClick={()=>setModal({type:"task",task:t})}><strong>{t.title}{t.priority==="high"&&<span className="priority-dot"/>}</strong><span>{t.memberIds?.length?"执行成员":"未指定执行成员"}<i>·</i>{t.activityName||departmentLabel(t.department)}{!!t.memberIds?.length&&<em className="participant-summary">{t.memberIds.map(id=>data?.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")}</em>}{!t.memberIds?.length&&t.assignee&&t.sourceRefs?.some(r=>r.startsWith("kd:"))&&<em className="participant-summary">原表執行人：{t.assignee}（未配對）</em>}{t.department==="运营部"&&<em>{t.reportToTeamSheets===false?"僅個人紀錄":t.reportToTeamSheets===true?"計入團委表格":t.sourceRecorded?"原表已通過":"完結時確認上報"}</em>}{t.demo&&<em>示例</em>}</span>{followupReason(t,today)&&<small className={`task-followup-reason ${t.status==="review"?"review":""}`}>{followupReason(t,today)}</small>}</button>
+    <button className="task-main" onClick={()=>setModal({type:"task",task:t})}><strong>{t.title}{t.priority==="high"&&<span className="priority-dot"/>}</strong><span>{t.memberIds?.length?"执行成员":"未指定执行成员"}<i>·</i>{t.activityName||departmentLabel(t.department)}{!!t.memberIds?.length&&<em className="participant-summary">{t.memberIds.map(id=>data?.members.find(m=>m.id===id)?.name).filter(Boolean).join("、")}</em>}{!t.memberIds?.length&&t.assignee&&t.sourceRefs?.some(r=>r.startsWith("kd:"))&&<em className="participant-summary">原表執行人：{t.assignee}（未配對）</em>}{t.status==="done"&&<em>已完成 · 本地紀錄</em>}{t.demo&&<em>示例</em>}</span>{followupReason(t,today)&&<small className={`task-followup-reason ${t.status==="review"?"review":""}`}>{followupReason(t,today)}</small>}</button>
     <div className="task-right"><Pill color={t.status==="doing"?"blue":t.status==="review"?"purple":t.status==="done"?"green":"gray"}>{statuses[t.status]}</Pill><small className={t.due&&t.due<today&&t.status!=="done"?"overdue":""}>{t.due?(t.due===today?"今天截止":fmtDateCN(t.due,false)):"未设截止"}</small></div>
-    <div className="task-review-actions">{t.status==="done"&&t.department==="行政部"?<button className="text-button" disabled={busy} onClick={()=>setInternalApproval(t)}>紀錄與上報</button>:t.status==="done"&&t.department==="运营部"?<button className="text-button" disabled={busy} onClick={()=>setApproval(t)}>紀錄與上報</button>:t.status==="review"?<><button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"done")}>通过</button><button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"doing")}>退回修改</button></>:t.status!=="done"&&requiresMyReview(t)?<button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"review")}>开始审批</button>:null}</div>
+    <div className="task-review-actions">{t.status==="done"&&t.department==="行政部"?<button className="text-button" disabled={busy} onClick={()=>setInternalApproval(t)}>工作紀錄</button>:t.status==="done"&&t.department==="运营部"?<button className="text-button" disabled={busy} onClick={()=>setApproval(t)}>工作紀錄</button>:t.status==="review"?<><button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"done")}>通过</button><button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"doing")}>退回修改</button></>:t.status!=="done"&&requiresMyReview(t)?<button className="text-button" disabled={busy} onClick={()=>void patchTask(t,"review")}>开始审批</button>:null}</div>
     <button className="icon-button more" aria-label={`编辑${t.title}`} onClick={()=>setModal({type:"task",task:t})}><MoreHorizontal size={18}/></button>
   </div>)}</div>:<Empty title="这里已经清清爽爽" text="没有符合条件的事项。可以新建一条，或调整筛选条件。"/>;
 
@@ -177,9 +175,9 @@ export default function Workbench() {
       {page==="library"&&<LibraryWorkspace resource={data.resources.find(r=>r.id==="library-reservation")}/>}
       {page==="icloud"&&<ICloudCalendar events={data.events} onChange={load}/>}
 
-      {page==="performance"&&<PerformancePanel onChange={load} members={data.members} tasks={data.tasks}/>}
+      {page==="performance"&&<LocalWorkRecords department="行政部" onChange={load} members={data.members} tasks={data.tasks}/>}
       {page==="github"&&<GithubPanel/>}
-      {page==="worklogs"&&<WorkLogPanel settings={data.settings} teamSheets={data.teamSheets} records={data.workLogs||[]} members={data.members} tasks={data.tasks} onTaskApproval={setApproval} onChange={load}/>}
+      {page==="worklogs"&&<LocalWorkRecords department="运营部" members={data.members} tasks={data.tasks} onChange={load}/>}
       {page==="settings"&&<div className="settings-grid"><DepartmentSettings onChange={load}/><CalendarIdentity members={data.members} settings={data.settings} onSave={body=>act(()=>api("settings","PATCH",body),"本人日程身份已保存")}/><AssistantSettings/><section className="panel settings-panel"><div className="panel-heading"><div><h2>个人信息</h2><p>让工作台更像你的空间。</p></div><div className="icon-tile blue"><UsersRound size={19}/></div></div><form onSubmit={e=>{e.preventDefault();void act(()=>api("settings","PATCH",Object.fromEntries(new FormData(e.currentTarget))),"个人信息已保存");}}><Field label="怎么称呼你"><input name="name" defaultValue={data.settings.name} placeholder="你的名字" maxLength={60}/></Field><Field label="组织名称"><input name="org" defaultValue={data.settings.org}/></Field><Field label="学校"><input name="school" defaultValue={data.settings.school} placeholder="学校名称"/></Field><button className="button primary" disabled={busy}>保存信息</button></form></section><section className="panel settings-panel"><div className="panel-heading"><div><h2>数据与备份</h2><p>本地保存，迁移时一起带走。</p></div><div className="icon-tile green"><HardDrive size={19}/></div></div><label className="field"><span>当前数据目录</span><code>{data.system.dataDir}</code></label><p className="settings-description">导出内容包含事项、日程、文档和报销文件。迁移到云服务器时，将完整数据目录挂载至应用即可。</p><a className="button secondary" href="/api/backup"><Download size={16}/>导出完整备份</a><div className="settings-divider"/><h3>示例数据</h3><p className="settings-description">示例包含虚构的部员和安排，方便体验界面与工作流程。</p><button className="button secondary" disabled={busy||data.demo} onClick={()=>void act(()=>api("demo","POST"),"示例已载入")}>{data.demo?"已载入示例":"载入示例数据"}</button></section><AccountSettings/><section className="panel settings-panel"><div className="panel-heading"><div><h2>报销默认信息</h2><p>用于抬头校验与 Excel 明细生成。</p></div><div className="icon-tile orange"><ReceiptText size={19}/></div></div><BillingSettings settings={data.settings} busy={busy} onSave={body=>act(()=>api("settings","PATCH",body),"当前组织的报销信息已保存")}/></section></div>}
       {page==="home"&&data.resources.length>0&&<div className="home-resources"><ResourceHub resources={data.resources} compact onMessage={notify} onOpen={r=>{if(r.id==="device-admin")go("devices");else{go("resources");setEmbedded(r);}}}/></div>}
       <div className="page-footer"><span>个人工作台</span><span>专注当下，从容推进。</span><span>LOCAL WORKSPACE · V1.0</span></div>
@@ -187,7 +185,7 @@ export default function Workbench() {
       </div>
     </main>
     {toast&&<div className="toast" role="status"><div><Check size={14}/></div>{toast}</div>}
-    {internalApproval&&<KdocsTaskApproval task={internalApproval} onClose={()=>setInternalApproval(null)} onSaved={async()=>{await load();notify("行政部任務紀錄已保存");}}/>}
+    {internalApproval&&<TaskApproval members={data?.members||[]} tasks={data?.tasks||[]} task={internalApproval} onClose={()=>setInternalApproval(null)} onSaved={async()=>{await load();notify("行政部任務紀錄已保存");}}/>}
     {approval&&<TaskApproval task={approval} members={data?.members||[]} tasks={data?.tasks||[]} onClose={()=>setApproval(null)} onSaved={async()=>{await load();notify("任務完成方式與紀錄已保存");}}/>}
     {matterEditor&&<MatterEditor matter={matterEditor} defaultDepartment={dept==="全部"?"运营部":dept} onClose={()=>setMatterEditor(null)} onSaved={load}/>}
     {borrowingsOpen&&<EditorDialog title="设备待办 · 借出未归还" subtitle="数据来自设备网站，归还后会在下次读取时移出。" onClose={()=>setBorrowingsOpen(false)}><div className="borrowings-dialog"><EquipmentBorrowings data={borrowings} error={borrowingsError} loading={borrowingsLoading} refresh={updateBorrowings} onManage={()=>{setBorrowingsOpen(false);go("devices");}}/></div><footer className="modal-footer"><button type="button" className="button primary" onClick={()=>setBorrowingsOpen(false)}>关闭</button></footer></EditorDialog>}
