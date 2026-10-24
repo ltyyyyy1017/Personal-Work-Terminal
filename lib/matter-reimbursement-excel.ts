@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import {traditionalWorkbook} from "./export-traditional";
+import {exportWorkbook} from "./export-traditional";
 import type {Matter,ReimbActivity,Settings} from "./types";
 import {addIncomeExpenseSheet} from "./income-expense-excel";
 import {isReported,isFunded} from "./reimbursement-progress";
@@ -49,6 +49,6 @@ export async function buildMatterReimbursementWorkbook(matter:Matter,activities:
   const checks=activities.flatMap(a=>(a.output?.warnings||[]).map(w=>[a.submitter.trim()||"未填写",a.name,w]));
   if(checks.length){const ws=sheet("待核对事项",["报销人","报销名称","提示"],[22,36,100],"以下提示汇总自各笔报销的材料检查。请在提交前核对。");checks.forEach(row=>add(ws,row));}
   for(const ws of wb.worksheets.filter(s=>s.name!=="收支明細表")){const hasTotal=ws.getCell(ws.rowCount,1).value==="事务合计";ws.autoFilter={from:{row:5,column:1},to:{row:Math.max(5,ws.rowCount-(hasTotal?1:0)),column:ws.columnCount}};}
-  traditionalWorkbook(wb);
+  exportWorkbook(wb,matter.department);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

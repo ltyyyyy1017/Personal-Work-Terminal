@@ -8,7 +8,7 @@ import { mergePdfs, normalizeToPdf } from "./pdf";
 import { namingPlan, reimbursementPackageBase, suggestKind } from "./naming";
 import { decodePlainText } from "./plain-text";
 import { readMaterial } from "./material-reader";
-import {traditional} from "./export-traditional";
+import {exportText} from "./export-traditional";
 import {retainedMaterial} from "./reimbursement-formats";
 import { buildReimburseWorkbook } from "./excel";
 import { analyzeActivity, type CheckItem } from "./checks";
@@ -63,6 +63,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     if (companion) { file.kind = "同行人"; companionIds.add(file.id); }
   }
 
+  const text=(value:string)=>exportText(value,activity.department);
   const settings = organizationSettings(store.settings,activity.department);
   const plan = namingPlan(activity, settings.reimbursement.namingTemplate);
   if (!plan.length) throw new AppError("没有可打包的材料", 400);
@@ -82,7 +83,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     try {
       const buf = readReimburseFile(file.storedName);
       const plainText = retainedMaterial(file.originalName);
-      const { bytes } = plainText ? { bytes: /\.(txt|md|csv)$/i.test(file.originalName)?Buffer.from(traditional(decodePlainText(buf)),"utf8"):buf } : await normalizeToPdf(buf, file.mime, file.originalName);
+      const { bytes } = plainText ? { bytes: /\.(txt|md|csv)$/i.test(file.originalName)?Buffer.from(text(decodePlainText(buf)),"utf8"):buf } : await normalizeToPdf(buf, file.mime, file.originalName);
       const name = uniqueName(row.name, used);
       fs.writeFileSync(path.join(outDir, name), bytes);
       manifest.push({ name, size: bytes.byteLength, kind: file.kind, fileId:file.id, originalName:file.originalName });
@@ -101,7 +102,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
   if (settings.reimbursement.mergeAll && pdfList.length > 1) {
     try {
       const merged = await mergePdfs(pdfList);
-      mergedName = uniqueName("00-全部材料合併.pdf", used);
+      mergedName = uniqueName(text("00-全部材料合併.pdf"), used);
       fs.writeFileSync(path.join(outDir, mergedName), merged);
       manifest.push({ name: mergedName, size: merged.byteLength, kind: "合并件" });
     } catch (err) {
@@ -115,7 +116,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     settings,
     plan,
   });
-  const xlsxName = uniqueName("報銷明細表.xlsx", used);
+  const xlsxName = uniqueName(text("報銷明細表.xlsx"), used);
   fs.writeFileSync(path.join(outDir, xlsxName), xlsx);
 
   const readme = [
@@ -135,8 +136,8 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
     "",
     `打包时间：${new Date().toLocaleString("zh-CN")}`,
     `由「个人工作台」生成 · 文件名与报销明细表一一对应`,
-  ].map(traditional).join("\r\n");
-  const readmeName = "材料清單.txt";
+  ].map(text).join("\r\n");
+  const readmeName = text("材料清單.txt");
   fs.writeFileSync(path.join(outDir, readmeName), readme, "utf8");
 
   const zip = new JSZip();
@@ -155,6 +156,7 @@ export async function buildActivity(activityId: string): Promise<BuildResult> {
   fs.writeFileSync(path.join(outDir, zipName), zipBuffer);
 
   const output: ReimbOutput = {
+    script:activity.department==="行政部"?"traditional":"simplified",
     builtAt: new Date().toISOString(),
     dir: path.relative(dirs.root, outDir).split(path.sep).join("/"),
     zipName,

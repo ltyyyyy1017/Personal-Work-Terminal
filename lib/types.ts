@@ -64,6 +64,7 @@ export interface ReimbFile {
 }
 
 export interface ReimbOutput {
+  script?: "simplified"|"traditional";
   builtAt: string;
   dir: string;
   zipName: string;

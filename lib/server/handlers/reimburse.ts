@@ -418,8 +418,13 @@ export async function build(ctx: Ctx) {
 
 export async function download(ctx: Ctx) {
   const store = readStore();
-  const activity = findActivity(store, ctx.params.id);
+  let activity = findActivity(store, ctx.params.id);
   if (!activity.output) throw new AppError("还没有生成打包文件，请先点击「生成材料包」", 404);
+  if(activity.department!=="行政部"&&activity.output.script!=="simplified"){
+    if(ctx.url.searchParams.get("what")==="file")throw new AppError("导出语言已调整，请重新生成材料包后下载单份材料",409);
+    activity=(await buildActivity(activity.id)).activity;
+  }
+  if(!activity.output)throw new AppError("请重新生成材料包",404);
   const dir = path.resolve(dirs.root, activity.output.dir);
   if (!dir.startsWith(path.resolve(dirs.exports) + path.sep)) {
     throw new AppError("非法的导出路径", 400);
