@@ -10,7 +10,7 @@ export function migrateLocalWork(s:Store){
  for(const v of s.teamSheets?.volunteers||[]){if(!v.memberId||!s.members.some(m=>m.id===v.memberId))continue;const task=s.tasks.find(t=>t.id===v.localTaskId||t.sourceRefs?.some(r=>v.sourceRefs.includes(r)));if(task?.sourceMissing||task&&covered.has(`${task.id}:${v.memberId}`))continue;add({id:`legacy:hours:${v.id}`,department:"运营部",memberId:v.memberId,taskId:task?.id,title:task?.title||v.detail||v.title,date:task?.workDate||v.date||"",hours:number(v.workHours),volunteerHours:number(v.hours),role:"執行",tableRecorded:true,note:v.detail,createdAt:task?.createdAt||stamp,updatedAt:stamp});}
  for(const t of s.tasks.filter(t=>t.status==="done"&&!t.sourceMissing))for(const id of [...new Set([...(t.memberIds||[]),...(t.reviewerMemberIds||[])])]){
   if(covered.has(`${t.id}:${id}`)||!s.members.some(m=>m.id===id&&m.department===t.department))continue;
-  const executes=t.memberIds?.includes(id),reviews=t.reviewerMemberIds?.includes(id),date=t.workDate||t.due?.slice(0,10)||"";
+  const executes=t.memberIds?.includes(id),reviews=t.reviewerMemberIds?.includes(id),date=t.workDate||"";
   const mirrors=t.sheetOrigin?.task?s.localWorkRecords.filter(r=>r.id.startsWith("legacy:hours:")&&r.memberId===id&&r.date===date&&norm(r.title)===norm(t.title)):[];
   if(mirrors.length===1){mirrors[0].relatedTaskIds=[...new Set([...(mirrors[0].relatedTaskIds||[]),t.id])];continue;}
   const recorded=Boolean(t.sourceRecorded||s.teamSheets?.nativeLinks?.[t.id]?.some(l=>l.kind==="hours")||s.kdocs?.publications?.[t.id]?.length);
@@ -25,7 +25,7 @@ export function recordTaskWork(s:Store,t:Task,values?:unknown){
  for(const id of [...new Set([...(t.memberIds||[]),...(t.reviewerMemberIds||[])])]){
   if(!s.members.some(m=>m.id===id&&m.department===t.department))continue;
   let r=s.localWorkRecords.find(r=>r.memberId===id&&(r.taskId===t.id||r.relatedTaskIds?.includes(t.id)));const v=input.find(v=>v.memberId===id),executes=t.memberIds?.includes(id),reviews=t.reviewerMemberIds?.includes(id);
-  if(!r){r={id:`local:task:${t.id}:${id}`,department:t.department,memberId:id,taskId:t.id,matterId:t.matterId,title:t.title,date:t.workDate||t.due?.slice(0,10)||"",role:reviews?executes?"執行及審核":"審核":"執行",tableRecorded:false,note:t.note||"",createdAt:t.createdAt,updatedAt:t.updatedAt};s.localWorkRecords.push(r);}
+  if(!r){r={id:`local:task:${t.id}:${id}`,department:t.department,memberId:id,taskId:t.id,matterId:t.matterId,title:t.title,date:t.workDate||"",role:reviews?executes?"執行及審核":"審核":"執行",tableRecorded:false,note:t.note||"",createdAt:t.createdAt,updatedAt:t.updatedAt};s.localWorkRecords.push(r);}
   if(v){r.hours=v.hours;r.performance=v.performance;r.tableRecorded=v.tableRecorded===true;}
   r.updatedAt=t.updatedAt;
  }

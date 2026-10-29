@@ -67,6 +67,7 @@ async function route(req: NextRequest, context: { params: Promise<{path: string[
     if (key === "auth/passkeys/remove" && method === "POST") return await passkeys.remove(ctx);
     if(path[0]==="team-sheets"||path[0]==="kdocs")return json({error:"表格連接模組已移除，請使用本地工作紀錄"},410);
     if(key==="work-records"&&method==="GET")return localWork.list();
+    if(key==="work-records/batch"&&method==="POST")return await localWork.batch(ctx);
     if(key==="work-records"&&method==="POST"){ctx.params.id="";return await localWork.save(ctx);}
     if(path[0]==="work-records"&&path.length===2&&method==="PATCH")return await localWork.save(ctx);
     if(path[0]==="work-records"&&path.length===2&&method==="DELETE")return await localWork.remove(ctx);
