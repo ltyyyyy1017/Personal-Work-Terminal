@@ -47,7 +47,7 @@ export async function bulk(ctx:Ctx){
    }else for(const a of records){
      a.reported=isReported(a);
      if(operation==="report")a.reported=true;
-     if(operation==="unreport"){a.reported=false;a.fundingStatus="unpaid";}
+     if(operation==="unreport"){a.reported=false;a.fundingStatus="unpaid";a.received=false;}
      if(operation==="fund")a.fundingStatus="paid";
      if(operation==="unfund")a.fundingStatus="unpaid";
      if(operation==="associate")a.matterId=matterId||undefined;
