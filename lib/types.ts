@@ -83,6 +83,7 @@ export interface ReimbActivity {
   matterId?: string;
   reported?: boolean;
   fundingStatus?: "unpaid" | "paid";
+
   taxi?: {from:string;to:string;companions:string[]};
   organization?: Organization;
   contact?: string;
@@ -277,7 +278,9 @@ export interface LogEntry {
   message: string;
 }
 
+export interface WorkRecordChange {id:string;at:string;action:"create"|"edit"|"delete"|"restore"|"table-status";department:string;recordId:string;before?:LocalWorkRecord;after?:LocalWorkRecord}
 export interface Store {
+  workRecordHistory?:WorkRecordChange[];
   kdocs?: KdocsState;
   teamSheets?: TeamSheetState;
   performance: PerformanceEntry[];

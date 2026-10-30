@@ -16,6 +16,7 @@ const billingKey = (s: string) => s.normalize("NFKC").replace(/\s/g, "").toUpper
 export default function ReimbursementUpload({ settings, matters = [], defaultDepartment = "行政部", onBack, onSaved }: {
   settings: Settings; matters?: Matter[]; defaultDepartment?: Department; onBack: () => void; onSaved: (id: string) => Promise<void>;
 }) {
+  const [quick,setQuick]=useState(false);
   const departments = useDepartments(), departmentLabel = useDepartmentLabel();
   const [department, setDepartment] = useState<Department>(defaultDepartment), [entries, setEntries] = useState<Entry[]>([]);
   const [manual, setManual] = useState<Partial<Record<RecognitionField, string>>>({}), [extra, setExtra] = useState(reimbursementValue());
@@ -86,7 +87,7 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     const conflict = summary.conflicts.find(c => c.field === key);
     return <label className={`field ${options.wide ? "wide" : ""} ${summary.fields[key] && manual[key] === undefined ? "smart-field-detected" : ""}`}>
       <span>{recognitionLabels[key]}{options.required ? " *" : ""}{summary.fields[key] && manual[key] === undefined && <em>已识别</em>}</span>
-      {key === "currency" ? <select value={value(key)} disabled={!!draft} onChange={e => change(key, e.target.value)}><option value="">请选择币种</option>{["CNY", "HKD", "MOP", "TWD", "USD"].map(c => <option key={c}>{c}</option>)}</select> : key === "note" ? <textarea value={value(key)} rows={3} disabled={!!draft} maxLength={2000} onChange={e => change(key, e.target.value)}/> : <input value={value(key)} disabled={!!draft} type={options.type || "text"} step={options.type === "number" ? "0.01" : undefined} min={options.type === "number" ? "0.01" : undefined} maxLength={key === "item" ? 160 : key === "invoiceNo" ? 500 : 200} placeholder={options.placeholder || "识别后自动填写，缺失时可补充"} onChange={e => change(key, e.target.value)}/>}
+      {key === "currency" ? <select value={value(key)} disabled={!!draft} onChange={e => change(key, e.target.value)}><option value="">请选择币种</option>{["CNY", "HKD", "MOP", "TWD", "USD"].map(c => <option key={c}>{c}</option>)}</select> : key === "note" ? <textarea value={value(key)} rows={3} disabled={!!draft} maxLength={2000} onChange={e => change(key, e.target.value)}/> : <input value={value(key)} disabled={!!draft} type={options.type || "text"} step={options.type === "number" ? "0.01" : undefined} min={options.type === "number" ? "0.01" : undefined} maxLength={key === "item" ? 160 : key === "invoiceNo" ? 500 : 200} placeholder={options.placeholder || (quick?"选填":"识别后自动填写，缺失时可补充")} onChange={e => change(key, e.target.value)}/>}
       {source(key)}{options.hint && <small className="field-help">{options.hint}</small>}
       {conflict && <div className="smart-field-conflict"><small>附件中的结果不同，选择本次使用的值：</small>{conflict.options.map(c => <button type="button" key={c.value} disabled={!!draft} title={c.sources.join("、")} onClick={() => change(key, c.value)}>{c.value}</button>)}</div>}
     </label>;
@@ -95,21 +96,21 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
   async function submit() {
     setError("");
     if (reading) { setError("还有附件正在识别，完成后会自动填入。"); return; }
-    if (!entries.length) { setError("请先上传本次报销附件。"); return; }
-    if (!value("item").trim()) { setError("未能从附件中找到报销事项，请补充事项名称。"); return; }
+    
+    if (!value("item").trim()) { setError("请填写报销事项。"); return; }
     const amount = Number(value("amount")), currency = value("currency"), rmb = currency === "CNY" ? amount : Number(value("rmbAmount"));
-    if (!Number.isFinite(amount) || amount <= 0 || !currency || !Number.isFinite(rmb) || rmb <= 0) { setError("请补充有效的实付金额和币种；外币报销需有人民币结算金额。"); return; }
-    if (!value("date") || Number.isNaN(Date.parse(`${value("date")}T12:00:00`))) { setError("请补充有效的费用日期。"); return; }
+    if (!currency || (value("amount")!==""&&(!Number.isFinite(amount)||amount<=0)) || (!quick&&(!value("amount")||!Number.isFinite(rmb)||rmb<=0)) || (value("rmbAmount")!==""&&(!Number.isFinite(rmb)||rmb<=0))) { setError("请补充有效的实付金额和币种；外币报销需有人民币结算金额。"); return; }
+    if ((!quick&&!value("date")) || (value("date")&&Number.isNaN(Date.parse(`${value("date")}T12:00:00`)))) { setError("请补充有效的费用日期。"); return; }
     if (invoiceEntries.length && expected.taxId && (!value("taxId") || !taxMatch)) { setError("发票税号未识别或与当前组织不符，请核对识别结果或修正附件中的税号。"); return; }
     if (invoiceEntries.length && expected.invoiceTitle && !value("buyer")) { setError("尚未识别到发票抬头，请核对原件并补充。"); return; }
     const mismatched = invoiceEntries.find(e => { const taxId = invoiceEntries.length === 1 && manual.taxId !== undefined ? value("taxId") : e.result?.fields.taxId; return taxId && expected.taxId && billingKey(taxId) !== billingKey(expected.taxId); });
     if (mismatched) { setError(`「${mismatched.file.name}」的税号与当前组织不同，请在该附件的识别详情中校正，或改选所属组织。`); return; }
-    if (!confirmed) { setError("请先确认自动整理的信息。"); return; }
+    if (entries.length && !confirmed) { setError("请先确认自动整理的信息。"); return; }
     setSaving(true);
     try {
       let current = draft;
       if (!current) {
-        const response = await fetch("/api/activities", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: value("item"), itemName: value("item"), submitter: value("name"), handler: value("handler"), contact: value("contact"), department, date: value("date"), reason: value("note") || value("item"), amount: rmb, paidAmount: amount, currency, reviewed: true, ...reimbursementBody(extraValue), category: extraValue.taxiEnabled ? "交通差旅" : summary.category }) });
+        const response = await fetch("/api/activities", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: value("item"), itemName: value("item"), submitter: value("name"), handler: value("handler"), contact: value("contact"), department, date: value("date"), reason: value("note") || value("item"), amount: value("amount")&&(currency==="CNY"||value("rmbAmount"))?rmb:null, paidAmount: value("amount")?amount:undefined, currency, reviewed: entries.length?true:false, ...reimbursementBody(extraValue), category: extraValue.taxiEnabled ? "交通差旅" : summary.category }) });
         const data = await response.json(); if (!response.ok) throw new Error(data.error);
         current = { id: data.activity.id, itemId: data.activity.items[0].id }; setDraft(current);
       }
@@ -136,8 +137,8 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
   }
 
   return <div className="intake smart-intake"><button className="text-button back-link" disabled={saving} onClick={onBack}><ChevronLeft size={17}/>返回报销列表</button>
-    <div className="intake-heading"><span className="pill blue"><Sparkles size={13}/>智能整理</span><h2>材料放进来，信息自动填好。</h2><p>发票、支付记录、订单和行程单一起上传。核对识别结果，只补充缺失的信息。</p></div>
-    <section className="panel smart-upload-panel"><div className="smart-section-heading"><span>01</span><div><h3>上传本次报销材料</h3><p>无需先分类，图片、扫描 PDF 和 TXT 名单都可以识别。</p></div><small>{entries.length} / 20 份</small></div>
+    <div className="intake-heading"><div className="neutral-tabs"><button aria-pressed={!quick} className={!quick?"active":""} disabled={saving||!!draft} onClick={()=>setQuick(false)}>上传材料</button><button aria-pressed={quick} className={quick?"active":""} disabled={saving||!!draft||entries.length>0} onClick={()=>setQuick(true)}>先记一笔</button></div><span className="pill blue"><Sparkles size={13}/>智能整理</span><h2>{quick?"先记一笔":"新建报销"}</h2></div>
+    {!quick&&<section className="panel smart-upload-panel"><div className="smart-section-heading"><span>01</span><div><h3>上传本次报销材料</h3><p>无需先分类，图片、扫描 PDF 和 TXT 名单都可以识别。</p></div><small>{entries.length} / 20 份</small></div>
       <label className={`smart-upload-drop ${dragging ? "dragging" : ""}`} onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(e: DragEvent) => { e.preventDefault(); setDragging(false); add(e.dataTransfer.files); }}>
         <span className="smart-upload-icon"><Upload size={27}/></span><strong>{entries.length ? "继续添加附件" : "点击选择，或将文件拖到这里"}</strong><span>PDF / OFD / XML、Word / Excel、文字表格及常見圖片 · 文字 ≤ 1 MB，其他單份 ≤ 15 MB，合計 25 MB</span><input type="file" multiple hidden disabled={saving || !!draft} accept={MATERIAL_ACCEPT} onChange={e => { add(e.target.files); e.target.value = ""; }}/>
       </label>
@@ -153,13 +154,13 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
           {doc && !duplicate && <details className="smart-document-details"><summary>{Object.keys(doc.fields).length ? `已提取 ${Object.keys(doc.fields).length} 项信息 · 查看或校正` : "查看识别内容"}<ChevronDown size={14}/></summary><div className="smart-document-fields">{(["amount", "invoiceNo", "buyer", "taxId", "name", "handler", "from", "to", "companions"] as RecognitionField[]).filter(k => kind === "发票" || !!doc.fields[k]).map(key => <label className="field" key={key}><span>{key === "amount" && kind === "发票" ? "发票金额" : recognitionLabels[key]}</span><input type={key === "amount" ? "number" : "text"} min={key === "amount" ? "0.01" : undefined} step={key === "amount" ? "0.01" : undefined} value={doc.fields[key] || ""} disabled={saving || !!draft} onChange={e => correctDocument(entry.id, key, e.target.value)}/></label>)}</div>{doc.textPreview && <details className="smart-raw-text"><summary>查看识别文字</summary><pre>{doc.textPreview}</pre></details>}</details>}
         </article>;
       })}</div></>}
-    </section>
-    <section className="panel smart-results-panel"><div className="smart-section-heading"><span>02</span><div><h3>自动整理的报销信息</h3><p>{Object.keys(summary.fields).length ? `已自动填入 ${Object.keys(summary.fields).length} 项，可直接核对和修改。` : "上传材料后会自动填写；没有出现在附件里的资料才需补充。"}</p></div>{Object.keys(summary.fields).length > 0 && <span className="pill green"><Check size={13}/>已自动填入</span>}</div>
+    </section>}
+    <section className="panel smart-results-panel"><div className="smart-section-heading"><span>02</span><div><h3>报销信息</h3></div>{Object.keys(summary.fields).length > 0 && <span className="pill green"><Check size={13}/>已自动填入</span>}</div>
       <div className="form-grid"><label className="field wide"><span>所属组织与部门</span><select value={department} disabled={saving || !!draft} onChange={e => { setDepartment(e.target.value as Department); setExtra(v => ({ ...v, matterId: "" })); setMatterOverride(null); setConfirmed(false); }}>{departments.map(d => <option key={d.id} value={d.id}>{departmentLabel(d.id)}</option>)}</select></label>
         {field("item", { required: true, wide: true })}{field("name", { hint: "费用归属人，可替他人报销；未确定时可稍后补充。" })}{field("handler", { hint: "负责整理、上报材料的人，可以与报销人不同。" })}{field("contact", { placeholder: "选填，附件中出现时会自动填写" })}
-        {field("amount", { type: "number", required: true, hint: "优先采用实付记录；发票与支付记录不会重复相加。" })}{field("currency", { required: true })}
-        {value("currency") !== "CNY" && field("rmbAmount", { type: "number", required: true, wide: true, hint: "仅采用附件中明确的人民币结算金额，不自行猜测汇率。" })}
-        {field("date", { type: "date", required: true, hint: "取自行程／支付日期，未識別時請補充；不使用開票日期。" })}{field("invoiceNo")}
+        {field("amount", { type: "number", required: !quick })}{field("currency", { required: true })}
+        {value("currency") !== "CNY" && field("rmbAmount", { type: "number", required: !quick, wide: true })}
+        {field("date", { type: "date", required: !quick })}{field("invoiceNo")}
         {field("buyer", { hint: expected.invoiceTitle ? `本组织抬头：${expected.invoiceTitle}` : "识别到发票时自动填入；其他材料可留空。" })}{field("taxId", { hint: expected.taxId ? `本组织税号：${expected.taxId}` : "未设置默认税号时，不强制补填。" })}
         {field("note", { wide: true })}
       </div>
@@ -171,6 +172,6 @@ export default function ReimbursementUpload({ settings, matters = [], defaultDep
     </section>
     {error && <div className="error-banner smart-intake-error" role="alert"><AlertCircle size={18}/>{error}</div>}
     {draft && error && <p className="smart-notice">基本信息已经保存。点击继续保存即可补齐附件，不会重复建立报销。</p>}
-    <section className="smart-intake-submit"><label><input type="checkbox" checked={confirmed} disabled={reading || saving} onChange={e => setConfirmed(e.target.checked)}/><span>我已核对自动填入的信息，确认金额和附件内容一致。</span></label><div><p>先保存为报销草稿，材料不全也可以稍后补充。</p><button className="button primary" disabled={saving || reading || !confirmed} onClick={() => void submit()}>{saving || reading ? <LoaderCircle size={17} className="spin"/> : <Check size={17}/>} {saving ? "正在保存…" : reading ? "正在识别材料…" : draft ? "继续保存附件" : "保存并查看材料"}</button></div></section>
+    <section className="smart-intake-submit">{entries.length>0&&<label><input type="checkbox" checked={confirmed} disabled={reading || saving} onChange={e => setConfirmed(e.target.checked)}/><span>我已核对自动填入的信息，确认金额和附件内容一致。</span></label>}<div><button className="button primary" disabled={saving || reading || (entries.length>0&&!confirmed)} onClick={() => void submit()}>{saving || reading ? <LoaderCircle size={17} className="spin"/> : <Check size={17}/>} {saving ? "正在保存…" : reading ? "正在识别材料…" : draft ? "继续保存附件" : quick?"保存记录":"保存报销"}</button></div></section>
   </div>;
 }

@@ -149,6 +149,7 @@ try{
   await json(`docs/${doc.id}`,"PATCH",{folder:"archive"});assert.equal((await json("state")).docs[0].folder,"archive");
   console.log("PASS file upload, archive and download");
   const reimbursementMatter=(await json("matters","POST",{title:"测试交通事务",department:"行政部"})).matter;
+  const quick=(await json("activities","POST",{name:"先记一笔",department:"运营部",amount:null,date:""})).activity;assert.equal(quick.files.length,0);assert.equal(quick.items[0].amount,null);assert.equal(quick.date,"");assert.equal(quick.status,"draft");const persistedQuick=(await json("state")).activities.find(a=>a.id===quick.id);assert.equal(persistedQuick.name,"先记一笔");assert.equal(persistedQuick.items[0].amount,null);await json("activities/"+quick.id,"DELETE");console.log("PASS record-only reimbursement persists without files, amount or invented date");
   const {activity}=await json("activities","POST",{name:"集成验证活动",itemName:"打车费用",amount:128,department:"行政部",date:"2026-10-20",contact:"",matterId:reimbursementMatter.id,reported:false,fundingStatus:"unpaid",taxi:{from:"学校",to:"会场",companions:["测试同行甲","测试同行乙"]}});
   await json("settings","PATCH",{name:"测试经办本人",reimbursement:{submitter:"个人默认姓名",phone:"个人默认电话",bankName:"个人默认银行",bankAccount:"个人默认账号"}});
   await json("settings","PATCH",{reimbursement:{exportFormats:{"行政部":{format:"income-expense",title:"测试届次收支明細表"}}}});
