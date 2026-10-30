@@ -83,7 +83,7 @@ export interface ReimbActivity {
   matterId?: string;
   reported?: boolean;
   fundingStatus?: "unpaid" | "paid";
-  received?:boolean;
+
   taxi?: {from:string;to:string;companions:string[]};
   organization?: Organization;
   contact?: string;
